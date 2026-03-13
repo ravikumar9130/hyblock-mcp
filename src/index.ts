@@ -281,6 +281,11 @@ async function main() {
             sessionIdGenerator: () => crypto.randomUUID(),
         });
         const app = express();
+        app.use(express.json());
+
+        app.get("/", (req, res) => {
+            res.send("Hyblock Capital MCP Server is running. Use /sse and /messages for MCP.");
+        });
 
         app.get("/sse", async (req, res, next) => {
             try {
@@ -292,7 +297,7 @@ async function main() {
 
         app.post("/messages", async (req, res, next) => {
             try {
-                await transport.handleRequest(req, res);
+                await transport.handleRequest(req, res, req.body);
             } catch (err) {
                 next(err);
             }
