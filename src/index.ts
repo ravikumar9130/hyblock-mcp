@@ -16,6 +16,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import express from "express";
+import crypto from "crypto";
 
 import { createApiClient } from "./auth.js";
 import * as H from "./hyblock.js";
@@ -276,15 +277,38 @@ server.registerTool("hyblock_coin_profile", z.object({
 
 async function main() {
     if (PORT) {
-        const transport = new StreamableHTTPServerTransport();
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => crypto.randomUUID(),
+        });
         const app = express();
 
-        app.get("/sse", async (req, res) => {
-            await transport.handleRequest(req, res);
+        app.get("/sse", async (req, res, next) => {
+            try {
+                await transport.handleRequest(req, res);
+            } catch (err) {
+                next(err);
+            }
         });
 
-        app.post("/messages", async (req, res) => {
-            await transport.handleRequest(req, res);
+        app.post("/messages", async (req, res, next) => {
+            try {
+                await transport.handleRequest(req, res);
+            } catch (err) {
+                next(err);
+            }
+        });
+
+        // Global error handler
+        app.use((err: any, req: any, res: any, next: any) => {
+            console.error("MCP Server Error:", err);
+            res.status(500).json({
+                jsonrpc: "2.0",
+                error: {
+                    code: -32000,
+                    message: err.message || "Internal Server Error"
+                },
+                id: null
+            });
         });
 
         await server.connect(transport);
