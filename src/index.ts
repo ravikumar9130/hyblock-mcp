@@ -51,19 +51,60 @@ function getClient() {
 
 function normalizeParams<T>(args: any): T {
     const p = { ...args };
-    if (p.coin) p.coin = p.coin.toLowerCase();
-    if (p.interval && !p.timeframe) p.timeframe = p.interval;
-    if (!p.timeframe && (p.coin || p.exchange)) p.timeframe = "1h"; // sensible default for most tools
 
-    // Heuristics for common exchange names
+    // Handle symbols/coins
+    if (p.symbol && !p.coin) p.coin = p.symbol;
+    if (p.coin) {
+        p.coin = p.coin.toLowerCase();
+        // Remove 'usdt' or 'perp' suffix if AI adds it (e.g. BTCUSDT -> btc)
+        p.coin = p.coin.replace(/usdt$|perp$/i, "");
+    }
+
+    // Handle timeframes
+    if (p.interval && !p.timeframe) p.timeframe = p.interval;
+    if (!p.timeframe && (p.coin || p.exchange)) p.timeframe = "1h"; // sensible default
+
+    // Mapping for common exchange names/aliases
     if (p.exchange) {
         const ex = p.exchange.toLowerCase();
-        if (ex === "binance") p.exchange = "binance_perp_stable";
-        if (ex === "bybit") p.exchange = "bybit_perp_stable";
-        if (ex === "okx") p.exchange = "okx_perp_stable";
-        if (ex === "dydx") p.exchange = "dydx_perp_stable";
+        if (ex.includes("binance")) p.exchange = "binance_perp_stable";
+        else if (ex.includes("bybit")) p.exchange = "bybit_perp_stable";
+        else if (ex.includes("okx")) p.exchange = "okx_perp_stable";
+        else if (ex.includes("dydx")) p.exchange = "dydx_perp_stable";
+        else if (ex.includes("gate")) p.exchange = "gate_perp_stable";
+        else if (ex.includes("deribit")) p.exchange = "deribit_perp_stable";
+        else if (ex.includes("bitmex")) p.exchange = "bitmex_perp_stable";
     }
+
+    // Stripping disallowed fields (Hyblock v2 API is strict)
+    delete p.symbol;
+    delete p.interval;
+
     return p as T;
+}
+
+/**
+ * Enhanced tool wrapper to provide better error messages to the AI
+ */
+async function toolHandler(fn: Function, args: any) {
+    try {
+        const client = await getClient();
+        const params = normalizeParams(args);
+        const data = await fn(client, params);
+        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    } catch (error: any) {
+        const status = error.response?.status;
+        const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+        const details = error.response?.data ? JSON.stringify(error.response.data) : "";
+
+        return {
+            isError: true,
+            content: [{
+                type: "text" as const,
+                text: `API Error (${status || "Unknown"}): ${errMsg}. \nDetails: ${details}\nParams used: ${JSON.stringify(normalizeParams(args))}`
+            }]
+        };
+    }
 }
 
 // ─── Zod Schemas ──────────────────────────────────────────────────────────────
@@ -85,10 +126,9 @@ const CommonSchema = {
         .describe("Alias for timeframe (e.g. 1h, 1d)."),
     limit: z
         .coerce.number()
-        .max(1000)
         .optional()
         .describe(
-            "Maximum records to return. Typical values: 50 (default), 100, 500, 1000."
+            "Maximum records to return. Allowed values: 5, 10, 20, 50, 100, 500, 1000."
         ),
     startTime: z
         .coerce.number()
@@ -118,13 +158,11 @@ const server = new McpServer({
  */
 
 server.registerTool("hyblock_ping", z.object({}).describe("Check the Hyblock API health/status."), async () => {
-    const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.ping(client), null, 2) }] };
+    return toolHandler(H.ping, {});
 });
 
 server.registerTool("hyblock_catalog", z.object({}).describe("Fetch valid coins, exchanges, and symbols support. Use this first to discover available values."), async () => {
-    const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getCatalog(client), null, 2) }] };
+    return toolHandler(H.getCatalog, {});
 });
 
 server.registerTool("hyblock_data_availability", z.object({
@@ -132,9 +170,7 @@ server.registerTool("hyblock_data_availability", z.object({
     coin: z.string(),
     exchange: z.string(),
 }).describe("Check historical data range for an endpoint."), async (args: any) => {
-    const { endpoint, coin, exchange } = args;
-    const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getDataAvailability(client, { endpoint, coin, exchange }), null, 2) }] };
+    return toolHandler(H.getDataAvailability, args);
 });
 
 /**
@@ -163,9 +199,7 @@ const OFW_TOOLS = [
 
 for (const t of OFW_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
-        const client = await getClient();
-        const params = normalizeParams<H.CommonParams>(args);
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
+        return toolHandler(t.fn, args);
     });
 }
 
@@ -173,18 +207,14 @@ server.registerTool("hyblock_anchored_cvd", z.object({
     ...CommonSchema,
     anchorTime: z.coerce.number().describe("Unix timestamp (ms) to anchor calculations."),
 }).describe("Get CVD anchored to a specific time."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getAnchoredCVD(client, params), null, 2) }] };
+    return toolHandler(H.getAnchoredCVD, args);
 });
 
 server.registerTool("hyblock_exchange_premium", z.object({
     ...CommonSchema,
     exchangeB: z.string().describe("Second exchange to compare against."),
 }).describe("Get price premium between two exchanges."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getExchangePremium(client, params), null, 2) }] };
+    return toolHandler(H.getExchangePremium, args);
 });
 
 /**
@@ -192,9 +222,7 @@ server.registerTool("hyblock_exchange_premium", z.object({
  */
 
 server.registerTool("hyblock_funding_rate", z.object(CommonSchema).describe("Get periodic funding rates."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<H.CommonParams>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getFundingRate(client, params), null, 2) }] };
+    return toolHandler(H.getFundingRate, args);
 });
 
 const SENTIMENT_TOOLS = [
@@ -208,9 +236,7 @@ const SENTIMENT_TOOLS = [
 
 for (const t of SENTIMENT_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
-        const client = await getClient();
-        const params = normalizeParams<H.CommonParams>(args);
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
+        return toolHandler(t.fn, args);
     });
 }
 
@@ -224,9 +250,7 @@ const BOOK_TOOLS = [
 
 for (const t of BOOK_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
-        const client = await getClient();
-        const params = normalizeParams<H.CommonParams>(args);
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
+        return toolHandler(t.fn, args);
     });
 }
 
@@ -240,27 +264,19 @@ const GLOBAL_SCHEMA = {
 };
 
 server.registerTool("hyblock_global_bid_ask_ratio", z.object(GLOBAL_SCHEMA).describe("Global aggregate bid-ask ratio."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getGlobalBidAskRatio(client, params), null, 2) }] };
+    return toolHandler(H.getGlobalBidAskRatio, args);
 });
 
 server.registerTool("hyblock_global_combined_book", z.object(GLOBAL_SCHEMA).describe("Global combined book depth."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getGlobalCombinedBook(client, params), null, 2) }] };
+    return toolHandler(H.getGlobalCombinedBook, args);
 });
 
 server.registerTool("hyblock_open_interest", z.object(CommonSchema).describe("Total open interest."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<H.CommonParams>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getOpenInterest(client, params), null, 2) }] };
+    return toolHandler(H.getOpenInterest, args);
 });
 
 server.registerTool("hyblock_open_interest_delta", z.object(CommonSchema).describe("Open interest delta."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<H.CommonParams>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getOpenInterestDelta(client, params), null, 2) }] };
+    return toolHandler(H.getOpenInterestDelta, args);
 });
 
 const VOL_SCHEMA = {
@@ -272,37 +288,28 @@ const VOL_SCHEMA = {
 };
 
 server.registerTool("hyblock_bvol", z.object(VOL_SCHEMA).describe("Binance Volatility Index (BVOL)."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getBvol(client, params), null, 2) }] };
+    return toolHandler(H.getBvol, args);
 });
 
 server.registerTool("hyblock_dvol", z.object(VOL_SCHEMA).describe("Deribit Volatility Index (DVOL)."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getDvol(client, params), null, 2) }] };
+    return toolHandler(H.getDvol, args);
 });
 
 server.registerTool("hyblock_margin_lending_ratio", z.object(CommonSchema).describe("Margin lending ratio."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<H.CommonParams>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getMarginLendingRatio(client, params), null, 2) }] };
+    return toolHandler(H.getMarginLendingRatio, args);
 });
 
 server.registerTool("hyblock_fear_and_greed_index", z.object({
-    limit: z.number().optional(),
-    startTime: z.number().optional(),
-    endTime: z.number().optional(),
+    limit: z.coerce.number().optional(),
+    startTime: z.coerce.number().optional(),
+    endTime: z.coerce.number().optional(),
     sort: z.enum(["asc", "desc"]).optional(),
 }).describe("Market Fear & Greed Index."), async (args: any) => {
-    const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getFearAndGreedIndex(client, args as any), null, 2) }] };
+    return toolHandler(H.getFearAndGreedIndex, args);
 });
 
 server.registerTool("hyblock_user_bot_ratio", z.object(CommonSchema).describe("Human user vs bot ratio."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<H.CommonParams>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getUserBotRatio(client, params), null, 2) }] };
+    return toolHandler(H.getUserBotRatio, args);
 });
 
 const LIQ_TOOLS = [
@@ -315,9 +322,7 @@ const LIQ_TOOLS = [
 
 for (const t of LIQ_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
-        const client = await getClient();
-        const params = normalizeParams<H.CommonParams>(args);
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
+        return toolHandler(t.fn, args);
     });
 }
 
@@ -328,19 +333,101 @@ server.registerTool("hyblock_indicator_profile", z.object({
     timeframe: z.string().optional(),
     interval: z.string().optional(),
 }).describe("Backtest indicator performance profiles."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getIndicatorProfile(client, params), null, 2) }] };
+    return toolHandler(H.getIndicatorProfile, args);
 });
 
 server.registerTool("hyblock_coin_profile", z.object({
     coin: z.string(),
     exchange: z.string(),
 }).describe("Coin statistics and profile."), async (args: any) => {
-    const client = await getClient();
-    const params = normalizeParams<any>(args);
-    return { content: [{ type: "text", text: JSON.stringify(await H.getCoinProfile(client, params), null, 2) }] };
+    return toolHandler(H.getCoinProfile, args);
 });
+
+/**
+ * Register Remaining Tools from Docs
+ */
+
+const EXT_TOOLS = [
+    { name: "hyblock_previous_week_level", desc: "Previous week open/high/low/equilibrium levels.", fn: H.getPreviousWeekLevel },
+    { name: "hyblock_previous_month_level", desc: "Previous month open/high/low/equilibrium levels.", fn: H.getPreviousMonthLevel },
+    { name: "hyblock_net_long_short_delta", desc: "Change in net long/short positions.", fn: H.getNetLongShortDelta },
+    { name: "hyblock_true_retail_long_short", desc: "Specific retail positioning bias.", fn: H.getTrueRetailLongShort },
+    { name: "hyblock_whale_position_dominance", desc: "Whale versus retail position influence.", fn: H.getWhalePositionDominance },
+    { name: "hyblock_bid_ask_ratio_diff", desc: "Change in bid-ask ratio over time.", fn: H.getBidAskRatioDiff },
+    { name: "hyblock_bid_ask_spread", desc: "Difference between best bid and best ask.", fn: H.getBidAskSpread },
+    { name: "hyblock_bids_increase_decrease", desc: "Change in limit bid volume.", fn: H.getBidsIncreaseDecrease },
+    { name: "hyblock_asks_increase_decrease", desc: "Change in limit ask volume.", fn: H.getAsksIncreaseDecrease },
+    { name: "hyblock_best_bid_ask", desc: "Closest executable bid and ask levels.", fn: H.getBestBidAsk },
+    { name: "hyblock_premium_p2p", desc: "Stablecoin P2P premium/discount.", fn: H.getPremiumP2P },
+    { name: "hyblock_liquidation_levels_tv", desc: "Liquidation levels formatted for TradingView.", fn: H.getLiquidationLevelsTV },
+    { name: "hyblock_top_trader_average_leverage_delta", desc: "Difference in leverage between long and short whales.", fn: H.getTopTraderAverageLeverageDelta },
+    { name: "hyblock_top_trader_margin_used", desc: "Total margin used by top long vs short traders.", fn: H.getTopTraderMarginUsed },
+    { name: "hyblock_top_trader_margin_used_delta", desc: "Net difference in margin used by whales.", fn: H.getTopTraderMarginUsedDelta },
+    { name: "hyblock_liquidation_levels", desc: "Estimated price levels for liquidations.", fn: H.getLiquidationLevels },
+    { name: "hyblock_cumulative_liq_level", desc: "Aggregate liquidation statistics.", fn: H.getCumulativeLiqLevel },
+    { name: "hyblock_profiles_tool_data", desc: "Enhanced profile analytics (vol delta, OI, liqs).", fn: H.getProfilesToolData },
+    { name: "hyblock_net_positions_heatmap_data", desc: "Distribution of positions across price buckets.", fn: H.getNetPositionsHeatmapData },
+];
+
+for (const t of EXT_TOOLS) {
+    server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
+        return toolHandler(t.fn, args);
+    });
+}
+
+const ANCHOR_TOOLS = [
+    { name: "hyblock_anchored_top_trader_accounts", desc: "Anchored whale account bias.", fn: H.getAnchoredTopTraderAccounts },
+    { name: "hyblock_anchored_top_trader_positions", desc: "Anchored whale position bias.", fn: H.getAnchoredTopTraderPositions },
+    { name: "hyblock_anchored_global_accounts", desc: "Anchored global sentiment bias.", fn: H.getAnchoredGlobalAccounts },
+    { name: "hyblock_anchored_clsd", desc: "Anchored net positioning momentum (CLSD).", fn: H.getAnchoredClsd },
+    { name: "hyblock_anchored_cls", desc: "Anchored cumulative net positioning (CLS).", fn: H.getAnchoredCls },
+    { name: "hyblock_anchored_whale_retail_delta", desc: "Anchored whale vs retail divergence.", fn: H.getAnchoredWhaleRetailDelta },
+    { name: "hyblock_anchored_oi_delta", desc: "Anchored change in open interest.", fn: H.getAnchoredOiDelta },
+    { name: "hyblock_anchored_liquidation_levels_size", desc: "Anchored size of predicted liq levels.", fn: H.getAnchoredLiquidationLevelsSize },
+    { name: "hyblock_anchored_liquidation_levels_count", desc: "Anchored count of predicted liq levels.", fn: H.getAnchoredLiquidationLevelsCount },
+];
+
+for (const t of ANCHOR_TOOLS) {
+    server.registerTool(t.name, z.object({
+        ...CommonSchema,
+        anchorTime: z.coerce.number().describe("Unix timestamp (ms) to anchor calculations."),
+    }).describe(t.desc), async (args: any) => {
+        return toolHandler(t.fn, args);
+    });
+}
+
+const SPEC_GLOBAL_TOOLS = [
+    { name: "hyblock_global_bid_ask", desc: "Aggregated bid-ask volume across all tickers.", fn: H.getGlobalBidAsk },
+    { name: "hyblock_global_bid_ask_delta", desc: "Aggregated volume delta across all tickers.", fn: H.getGlobalBidAskDelta },
+    { name: "hyblock_global_bid_ask_ratio_increase_decrease", desc: "Change in global bid-ask ratio.", fn: H.getGlobalBidAskRatioIncreaseDecrease },
+    { name: "hyblock_global_bids_increase_decrease", desc: "Change in global limit bids.", fn: H.getGlobalBidsIncreaseDecrease },
+    { name: "hyblock_global_asks_increase_decrease", desc: "Change in global limit asks.", fn: H.getGlobalAsksIncreaseDecrease },
+];
+
+for (const t of SPEC_GLOBAL_TOOLS) {
+    server.registerTool(t.name, z.object(GLOBAL_SCHEMA).describe(t.desc), async (args: any) => {
+        return toolHandler(t.fn, args);
+    });
+}
+
+const GLOBAL_MISC_TOOLS = [
+    { name: "hyblock_leaderboard_notional_profit", desc: "Top trader notional profit rankings.", fn: H.getLeaderboardNotionalProfit },
+    { name: "hyblock_leaderboard_roe_profit", desc: "Top trader ROE profit rankings.", fn: H.getLeaderboardRoeProfit },
+    { name: "hyblock_wbtc_mint_burn", desc: "WBTC supply flow activity.", fn: H.getWbtcMintBurn },
+];
+
+const MISC_SCHEMA = {
+    limit: z.coerce.number().optional(),
+    startTime: z.coerce.number().optional(),
+    endTime: z.coerce.number().optional(),
+    sort: z.enum(["asc", "desc"]).optional(),
+};
+
+for (const t of GLOBAL_MISC_TOOLS) {
+    server.registerTool(t.name, z.object(MISC_SCHEMA).describe(t.desc), async (args: any) => {
+        return toolHandler(t.fn, args);
+    });
+}
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 

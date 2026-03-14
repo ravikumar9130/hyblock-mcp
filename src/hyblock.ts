@@ -400,3 +400,185 @@ export async function getCoinProfile(
     const res = await client.get("/coinProfile", { params });
     return res.data;
 }
+
+// ─── Missing Tools from Docs ─────────────────────────────────────────────────
+
+export async function getPreviousWeekLevel(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/previousWeekLevel", { params });
+    return res.data;
+}
+
+export async function getPreviousMonthLevel(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/previousMonthLevel", { params });
+    return res.data;
+}
+
+export async function getAnchoredTopTraderAccounts(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredTopTraderAccounts", { params });
+    return res.data;
+}
+
+export async function getAnchoredTopTraderPositions(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredTopTraderPositions", { params });
+    return res.data;
+}
+
+export async function getAnchoredGlobalAccounts(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredGlobalAccounts", { params });
+    return res.data;
+}
+
+export async function getNetLongShortDelta(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/netLongShortDelta", { params });
+    return res.data;
+}
+
+export async function getAnchoredClsd(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredClsd", { params });
+    return res.data;
+}
+
+export async function getAnchoredCls(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredCls", { params });
+    return res.data;
+}
+
+export async function getAnchoredWhaleRetailDelta(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredWhaleRetailDelta", { params });
+    return res.data;
+}
+
+export async function getTrueRetailLongShort(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/trueRetailLongShort", { params });
+    return res.data;
+}
+
+export async function getWhalePositionDominance(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/whalePositionDominance", { params });
+    return res.data;
+}
+
+export async function getBidAskRatioDiff(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/bidAskRatioDiff", { params });
+    return res.data;
+}
+
+export async function getBidAskSpread(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/bidsAskSpread", { params });
+    return res.data;
+}
+
+export async function getBidsIncreaseDecrease(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/bidsIncreaseDecrease", { params });
+    return res.data;
+}
+
+export async function getAsksIncreaseDecrease(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/asksIncreaseDecrease", { params });
+    return res.data;
+}
+
+export async function getBestBidAsk(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/bestBidAsk", { params });
+    return res.data;
+}
+
+export async function getGlobalBidAsk(client: AxiosInstance, params: any) {
+    const res = await client.get("/globalBidAsk", { params });
+    return res.data;
+}
+
+export async function getGlobalBidAskDelta(client: AxiosInstance, params: any) {
+    const res = await client.get("/globalBidAskDelta", { params });
+    return res.data;
+}
+
+export async function getGlobalBidAskRatioIncreaseDecrease(client: AxiosInstance, params: any) {
+    const res = await client.get("/globalBidAskRatioIncreaseDecrease", { params });
+    return res.data;
+}
+
+export async function getGlobalBidsIncreaseDecrease(client: AxiosInstance, params: any) {
+    const res = await client.get("/globalBidsIncreaseDecrease", { params });
+    return res.data;
+}
+
+export async function getGlobalAsksIncreaseDecrease(client: AxiosInstance, params: any) {
+    const res = await client.get("/globalAsksIncreaseDecrease", { params });
+    return res.data;
+}
+
+export async function getAnchoredOiDelta(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredOiDelta", { params });
+    return res.data;
+}
+
+export async function getPremiumP2P(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/premiumP2P", { params });
+    return res.data;
+}
+
+export async function getLeaderboardNotionalProfit(client: AxiosInstance, params: any) {
+    const res = await client.get("/leaderboardNotionalProfit", { params });
+    return res.data;
+}
+
+export async function getLeaderboardRoeProfit(client: AxiosInstance, params: any) {
+    const res = await client.get("/leaderboardRoeProfit", { params });
+    return res.data;
+}
+
+export async function getWbtcMintBurn(client: AxiosInstance, params: any) {
+    const res = await client.get("/wbtcMintBurn", { params });
+    return res.data;
+}
+
+export async function getAnchoredLiquidationLevelsSize(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredLiquidationLevelsSize", { params });
+    return res.data;
+}
+
+export async function getAnchoredLiquidationLevelsCount(client: AxiosInstance, params: CommonParams & { anchorTime: number }) {
+    const res = await client.get("/anchoredLiquidationLevelsCount", { params });
+    return res.data;
+}
+
+export async function getLiquidationLevelsTV(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/liquidationLevelsTV", { params });
+    return res.data;
+}
+
+export async function getTopTraderAverageLeverageDelta(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/topTraderAverageLeverageDelta", { params });
+    return res.data;
+}
+
+export async function getTopTraderMarginUsed(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/topTraderMarginUsed", { params });
+    return res.data;
+}
+
+export async function getTopTraderMarginUsedDelta(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/topTraderMarginUsedDelta", { params });
+    return res.data;
+}
+
+export async function getLiquidationLevels(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/liquidationLevels", { params });
+    return res.data;
+}
+
+export async function getCumulativeLiqLevel(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/cumulativeLiqLevel", { params });
+    return res.data;
+}
+
+export async function getProfilesToolData(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/profilesToolData", { params });
+    return res.data;
+}
+
+export async function getNetPositionsHeatmapData(client: AxiosInstance, params: CommonParams) {
+    const res = await client.get("/netPositionsHeatmapData", { params });
+    return res.data;
+}
