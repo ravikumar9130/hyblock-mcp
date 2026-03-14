@@ -90,18 +90,20 @@ async function toolHandler(fn: Function, args: any) {
     try {
         const client = await getClient();
         const params = normalizeParams(args);
+        console.log(`Executing tool: ${fn.name} with params:`, params);
         const data = await fn(client, params);
+        console.log(`Tool ${fn.name} success.`);
         return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     } catch (error: any) {
         const status = error.response?.status;
-        const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+        const errMsg = error.response?.data?.error?.message || error.response?.data?.error || error.response?.data?.message || error.message;
         const details = error.response?.data ? JSON.stringify(error.response.data) : "";
 
+        console.error(`Tool Execution Error [${fn.name}]:`, errMsg, details);
         return {
-            isError: true,
             content: [{
                 type: "text" as const,
-                text: `API Error (${status || "Unknown"}): ${errMsg}. \nDetails: ${details}\nParams used: ${JSON.stringify(normalizeParams(args))}`
+                text: `❌ API Error (${status || "Unknown"}): ${errMsg}. ${details ? `\nDetails: ${details}` : ""}\nParams: ${JSON.stringify(normalizeParams(args))}`
             }]
         };
     }
@@ -450,12 +452,22 @@ async function main() {
         app.use(express.json());
 
         // Root endpoint handles both GET (health/info) and POST/GET (MCP)
-        // StreamableHTTPServerTransport handles GET / for SSE and POST / for messages
-        // when mounted at a single path.
         app.all("/", async (req, res, next) => {
+            console.log(`[${req.method}] ${req.path} - Accept: ${req.headers.accept}`);
             if (req.method === "GET" && req.headers.accept !== "text/event-stream") {
-                return res.send("Hyblock Capital MCP Server is running. Connect to this URL in Claude.ai.");
+                return res.send("Hyblock Capital MCP Server is running. Status: OK");
             }
+            try {
+                await transport.handleRequest(req, res, req.body);
+            } catch (err) {
+                console.error("Transport error:", err);
+                next(err);
+            }
+        });
+
+        // Explicitly handle standard MCP paths without redirection to avoid transport issues
+        app.get("/sse", async (req, res, next) => {
+            console.log("[GET] /sse");
             try {
                 await transport.handleRequest(req, res, req.body);
             } catch (err) {
@@ -463,9 +475,14 @@ async function main() {
             }
         });
 
-        // Backward compatibility
-        app.all("/sse", (req, res) => res.redirect(301, "/"));
-        app.all("/messages", (req, res) => res.redirect(301, "/"));
+        app.post("/messages", async (req, res, next) => {
+            console.log("[POST] /messages");
+            try {
+                await transport.handleRequest(req, res, req.body);
+            } catch (err) {
+                next(err);
+            }
+        });
 
         // Global error handler
         app.use((err: any, req: any, res: any, next: any) => {
