@@ -49,31 +49,53 @@ function getClient() {
     return createApiClient(CLIENT_ID, CLIENT_SECRET, API_KEY);
 }
 
+function normalizeParams<T>(args: any): T {
+    const p = { ...args };
+    if (p.coin) p.coin = p.coin.toLowerCase();
+    if (p.interval && !p.timeframe) p.timeframe = p.interval;
+    if (!p.timeframe && (p.coin || p.exchange)) p.timeframe = "1h"; // sensible default for most tools
+
+    // Heuristics for common exchange names
+    if (p.exchange) {
+        const ex = p.exchange.toLowerCase();
+        if (ex === "binance") p.exchange = "binance_perp_stable";
+        if (ex === "bybit") p.exchange = "bybit_perp_stable";
+        if (ex === "okx") p.exchange = "okx_perp_stable";
+        if (ex === "dydx") p.exchange = "dydx_perp_stable";
+    }
+    return p as T;
+}
+
 // ─── Zod Schemas ──────────────────────────────────────────────────────────────
 
 const CommonSchema = {
-    coin: z.string().describe("Coin symbol (e.g. BTC, ETH). Must be supported by Hyblock catalog."),
+    coin: z.string().describe("Coin symbol (e.g. btc, eth). Case-insensitive, but lowercase is preferred."),
     exchange: z
         .string()
         .describe(
-            "Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable). Must be supported by Hyblock catalog."
+            "Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable, okx_perp_stable, dydx_perp_stable, gate_perp_stable). Use hyblock_catalog to see all."
         ),
     timeframe: z
         .enum(["1m", "5m", "15m", "1h", "4h", "1d"])
-        .describe("Required candle timeframe. Hyblock API rejects requests without a timeframe."),
+        .optional()
+        .describe("Required candle timeframe. If missing, defaults to 1h."),
+    interval: z
+        .string()
+        .optional()
+        .describe("Alias for timeframe (e.g. 1h, 1d)."),
     limit: z
-        .number()
+        .coerce.number()
         .max(1000)
         .optional()
         .describe(
             "Maximum records to return. Typical values: 50 (default), 100, 500, 1000."
         ),
     startTime: z
-        .number()
+        .coerce.number()
         .optional()
-        .describe("Optional start Unix timestamp (ms). If omitted, Hyblock uses a recent window."),
+        .describe("Optional start Unix timestamp (ms)."),
     endTime: z
-        .number()
+        .coerce.number()
         .optional()
         .describe("Optional end Unix timestamp (ms)."),
     sort: z
@@ -142,16 +164,18 @@ const OFW_TOOLS = [
 for (const t of OFW_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
         const client = await getClient();
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, args as H.CommonParams), null, 2) }] };
+        const params = normalizeParams<H.CommonParams>(args);
+        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
     });
 }
 
 server.registerTool("hyblock_anchored_cvd", z.object({
     ...CommonSchema,
-    anchorTime: z.number().describe("Unix timestamp (ms) to anchor calculations."),
+    anchorTime: z.coerce.number().describe("Unix timestamp (ms) to anchor calculations."),
 }).describe("Get CVD anchored to a specific time."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getAnchoredCVD(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getAnchoredCVD(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_exchange_premium", z.object({
@@ -159,7 +183,8 @@ server.registerTool("hyblock_exchange_premium", z.object({
     exchangeB: z.string().describe("Second exchange to compare against."),
 }).describe("Get price premium between two exchanges."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getExchangePremium(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getExchangePremium(client, params), null, 2) }] };
 });
 
 /**
@@ -168,7 +193,8 @@ server.registerTool("hyblock_exchange_premium", z.object({
 
 server.registerTool("hyblock_funding_rate", z.object(CommonSchema).describe("Get periodic funding rates."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getFundingRate(client, args as H.CommonParams), null, 2) }] };
+    const params = normalizeParams<H.CommonParams>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getFundingRate(client, params), null, 2) }] };
 });
 
 const SENTIMENT_TOOLS = [
@@ -183,7 +209,8 @@ const SENTIMENT_TOOLS = [
 for (const t of SENTIMENT_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
         const client = await getClient();
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, args as H.CommonParams), null, 2) }] };
+        const params = normalizeParams<H.CommonParams>(args);
+        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
     });
 }
 
@@ -198,7 +225,8 @@ const BOOK_TOOLS = [
 for (const t of BOOK_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
         const client = await getClient();
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, args as H.CommonParams), null, 2) }] };
+        const params = normalizeParams<H.CommonParams>(args);
+        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
     });
 }
 
@@ -213,22 +241,26 @@ const GLOBAL_SCHEMA = {
 
 server.registerTool("hyblock_global_bid_ask_ratio", z.object(GLOBAL_SCHEMA).describe("Global aggregate bid-ask ratio."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getGlobalBidAskRatio(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getGlobalBidAskRatio(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_global_combined_book", z.object(GLOBAL_SCHEMA).describe("Global combined book depth."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getGlobalCombinedBook(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getGlobalCombinedBook(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_open_interest", z.object(CommonSchema).describe("Total open interest."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getOpenInterest(client, args as H.CommonParams), null, 2) }] };
+    const params = normalizeParams<H.CommonParams>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getOpenInterest(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_open_interest_delta", z.object(CommonSchema).describe("Open interest delta."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getOpenInterestDelta(client, args as H.CommonParams), null, 2) }] };
+    const params = normalizeParams<H.CommonParams>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getOpenInterestDelta(client, params), null, 2) }] };
 });
 
 const VOL_SCHEMA = {
@@ -241,17 +273,20 @@ const VOL_SCHEMA = {
 
 server.registerTool("hyblock_bvol", z.object(VOL_SCHEMA).describe("Binance Volatility Index (BVOL)."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getBvol(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getBvol(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_dvol", z.object(VOL_SCHEMA).describe("Deribit Volatility Index (DVOL)."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getDvol(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getDvol(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_margin_lending_ratio", z.object(CommonSchema).describe("Margin lending ratio."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getMarginLendingRatio(client, args as H.CommonParams), null, 2) }] };
+    const params = normalizeParams<H.CommonParams>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getMarginLendingRatio(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_fear_and_greed_index", z.object({
@@ -266,7 +301,8 @@ server.registerTool("hyblock_fear_and_greed_index", z.object({
 
 server.registerTool("hyblock_user_bot_ratio", z.object(CommonSchema).describe("Human user vs bot ratio."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getUserBotRatio(client, args as H.CommonParams), null, 2) }] };
+    const params = normalizeParams<H.CommonParams>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getUserBotRatio(client, params), null, 2) }] };
 });
 
 const LIQ_TOOLS = [
@@ -280,7 +316,8 @@ const LIQ_TOOLS = [
 for (const t of LIQ_TOOLS) {
     server.registerTool(t.name, z.object(CommonSchema).describe(t.desc), async (args: any) => {
         const client = await getClient();
-        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, args as H.CommonParams), null, 2) }] };
+        const params = normalizeParams<H.CommonParams>(args);
+        return { content: [{ type: "text", text: JSON.stringify(await t.fn(client, params), null, 2) }] };
     });
 }
 
@@ -289,9 +326,11 @@ server.registerTool("hyblock_indicator_profile", z.object({
     coin: z.string(),
     exchange: z.string(),
     timeframe: z.string().optional(),
+    interval: z.string().optional(),
 }).describe("Backtest indicator performance profiles."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getIndicatorProfile(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getIndicatorProfile(client, params), null, 2) }] };
 });
 
 server.registerTool("hyblock_coin_profile", z.object({
@@ -299,7 +338,8 @@ server.registerTool("hyblock_coin_profile", z.object({
     exchange: z.string(),
 }).describe("Coin statistics and profile."), async (args: any) => {
     const client = await getClient();
-    return { content: [{ type: "text", text: JSON.stringify(await H.getCoinProfile(client, args as any), null, 2) }] };
+    const params = normalizeParams<any>(args);
+    return { content: [{ type: "text", text: JSON.stringify(await H.getCoinProfile(client, params), null, 2) }] };
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
