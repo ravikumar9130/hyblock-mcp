@@ -28,7 +28,14 @@ const CLIENT_SECRET = process.env.HYBLOCK_CLIENT_SECRET ?? "";
 const API_KEY = process.env.HYBLOCK_API_KEY ?? "";
 const PORT = process.env.PORT; // If defined, we use HTTP transport (Railway style)
 
-if (!CLIENT_ID || !CLIENT_SECRET || !API_KEY) {
+/**
+ * For local stdio usage we fail fast if credentials are missing.
+ * For HTTP (Railway/hosted) we still start the server so health checks
+ * succeed, but individual tool calls will return upstream auth errors.
+ */
+const HAS_CREDS = !!(CLIENT_ID && CLIENT_SECRET && API_KEY);
+
+if (!HAS_CREDS && !PORT) {
     console.error(
         "Error: HYBLOCK_CLIENT_ID, HYBLOCK_CLIENT_SECRET, and HYBLOCK_API_KEY must be set."
     );
