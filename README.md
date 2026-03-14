@@ -52,10 +52,14 @@ npm run build
 
 ## Configuration
 
-Set these environment variables before running:
+Set these environment variables before running (locally or in Railway):
 
 ```bash
 export HYBLOCK_CLIENT_ID="your_client_id"
+export HYBLOCK_CLIENT_SECRET="your_client_secret"
+export HYBLOCK_API_KEY="your_api_key"
+```
+
 Add the server to your MCP client configuration (e.g., `claude_desktop_config.json`).
 
 ### Option 1: Local Deployment (Standard)
@@ -82,16 +86,16 @@ Use this if you have deployed the server to Railway. This uses the **SSE (Server
 
 #### Setup in Railway
 1. Connect your GitHub repository to Railway.
-2. Add the following **Environment Variables**:
+2. Add the following **Environment Variables** (all are **required**; the server will refuse to start if any are missing or empty):
    - `HYBLOCK_CLIENT_ID`
    - `HYBLOCK_CLIENT_SECRET`
    - `HYBLOCK_API_KEY`
 3. Railway will use the `Dockerfile` to build and deploy. It will automatically assign a `PORT`.
 
 #### How to "Enter" in MCP Clients
-Once live, your server will have a URL (e.g., `https://hyblock-mcp-production.up.railway.app/sse`). 
+Once live, your server will have a base URL (e.g., `https://hyblock-mcp-production.up.railway.app`). 
 
-**For most MCP clients (like Claude Desktop)**, you need to point them to the `/sse` endpoint:
+**For most MCP clients (like Claude Desktop)**, you must point them to the `/sse` endpoint, not the bare root:
 
 ```json
 {
@@ -104,6 +108,11 @@ Once live, your server will have a URL (e.g., `https://hyblock-mcp-production.up
 ```
 
 *Note: If your client doesn't support the `url` field yet, you can use a small node bridge or the local version.*
+
+If you see `❌ API Error (401)` or `❌ API Error (403)` from any Hyblock tools, first verify that:
+
+- `HYBLOCK_CLIENT_ID`, `HYBLOCK_CLIENT_SECRET`, and `HYBLOCK_API_KEY` are correctly set in the server environment (Railway or local).
+- Your MCP client configuration is using the `/sse` endpoint as shown above.
 
 ---
 

@@ -27,7 +27,7 @@ const PORT = process.env.PORT;
 
 const HAS_CREDS = !!(CLIENT_ID && CLIENT_SECRET && API_KEY);
 
-if (!HAS_CREDS && !PORT) {
+if (!HAS_CREDS) {
     console.error("Error: HYBLOCK_CLIENT_ID, HYBLOCK_CLIENT_SECRET, and HYBLOCK_API_KEY must be set.");
     process.exit(1);
 }
@@ -107,12 +107,23 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
         return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     } catch (error: any) {
         const status = error.response?.status;
-        const errMsg = error.response?.data?.error?.message || error.response?.data?.error || error.response?.data?.message || error.message;
+        const errMsg =
+            error.response?.data?.error?.message ||
+            error.response?.data?.error ||
+            error.response?.data?.message ||
+            error.message;
         const details = error.response?.data ? JSON.stringify(error.response.data) : "";
+
+        let hint = "";
+        if (status === 401 || status === 403) {
+            hint =
+                "\nHint: Check that HYBLOCK_CLIENT_ID, HYBLOCK_CLIENT_SECRET, and HYBLOCK_API_KEY are correctly set in the server environment, and that your MCP client is using the /sse endpoint.";
+        }
+
         return {
             content: [{
                 type: "text" as const,
-                text: `❌ API Error (${status || "Unknown"}): ${errMsg}. ${details ? `\nDetails: ${details}` : ""}`
+                text: `❌ API Error (${status || "Unknown"}): ${errMsg}. ${details ? `\nDetails: ${details}` : ""}${hint}`
             }]
         };
     }
