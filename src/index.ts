@@ -348,7 +348,7 @@ async function main() {
 
         const port = parseInt(PORT);
         app.listen(port, "0.0.0.0", () => {
-            console.error(`Hyblock Capital MCP Server running on port ${port} (HTTP)`);
+            console.log(`Hyblock Capital MCP Server running on port ${port} (HTTP)`);
         });
     } else {
         const transport = new StdioServerTransport();
