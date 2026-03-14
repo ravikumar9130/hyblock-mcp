@@ -51,13 +51,34 @@ function getClient() {
 // ─── Zod Schemas ──────────────────────────────────────────────────────────────
 
 const CommonSchema = {
-    coin: z.string().describe("Coin symbol (e.g. BTC, ETH)"),
-    exchange: z.string().describe("Exchange name (e.g. binance, bybit)"),
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).optional().describe("Candle timeframe"),
-    limit: z.number().max(1000).optional().describe("Maximum records to return"),
-    startTime: z.number().optional().describe("Start Unix timestamp (ms)"),
-    endTime: z.number().optional().describe("End Unix timestamp (ms)"),
-    sort: z.enum(["asc", "desc"]).optional().describe("Sort order"),
+    coin: z.string().describe("Coin symbol (e.g. BTC, ETH). Must be supported by Hyblock catalog."),
+    exchange: z
+        .string()
+        .describe(
+            "Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable). Must be supported by Hyblock catalog."
+        ),
+    timeframe: z
+        .enum(["1m", "5m", "15m", "1h", "4h", "1d"])
+        .describe("Required candle timeframe. Hyblock API rejects requests without a timeframe."),
+    limit: z
+        .number()
+        .max(1000)
+        .optional()
+        .describe(
+            "Maximum records to return. Typical values: 50 (default), 100, 500, 1000."
+        ),
+    startTime: z
+        .number()
+        .optional()
+        .describe("Optional start Unix timestamp (ms). If omitted, Hyblock uses a recent window."),
+    endTime: z
+        .number()
+        .optional()
+        .describe("Optional end Unix timestamp (ms)."),
+    sort: z
+        .enum(["asc", "desc"])
+        .optional()
+        .describe("Sort order. Default is asc."),
 };
 
 // ─── MCP Server ───────────────────────────────────────────────────────────────

@@ -1,21 +1,35 @@
-# Use Node.js LTS
-FROM node:20-slim
-
-# Create app directory
+# --------- Stage 1: Build ---------
+FROM node:20-slim AS builder
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install ALL dependencies (including typescript)
+RUN npm ci
 
 # Copy source code and build
 COPY . .
 RUN npm run build
 
-# Expose the port Railway will provide
-EXPOSE ${PORT}
+# --------- Stage 2: Production ---------
+FROM node:20-slim
+WORKDIR /app
 
-# Run the server
+# Set to production mode
+ENV NODE_ENV=production
+
+# Copy package files
+COPY package*.json ./
+
+# Install ONLY production dependencies!
+RUN npm ci --omit=dev
+
+# Copy the compiled "dist" folder from the builder stage
+COPY --from=builder /app/dist ./dist
+
+# Railway will inject its own PORT, but setting a default is fine
+ENV PORT=8080
+EXPOSE 8080
+
 CMD ["node", "dist/index.js"]
