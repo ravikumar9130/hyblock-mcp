@@ -16,6 +16,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import express from "express";
+import cors from "cors";
 import crypto from "crypto";
 
 import { createApiClient } from "./auth.js";
@@ -308,28 +309,36 @@ async function main() {
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => crypto.randomUUID(),
         });
+
         const app = express();
+
+        // Enable CORS for all origins (Claude.ai, local development, etc.)
+        app.use(cors({
+            origin: "*",
+            methods: ["GET", "POST", "OPTIONS", "HEAD"],
+            allowedHeaders: ["Content-Type", "access-control-allow-origin", "mcp-protocol-version", "mcp-session-id"],
+            exposedHeaders: ["Location"]
+        }));
+
         app.use(express.json());
 
-        app.get("/", (req, res) => {
-            res.send("Hyblock Capital MCP Server is running. Use /sse and /messages for MCP.");
-        });
-
-        app.get("/sse", async (req, res, next) => {
-            try {
-                await transport.handleRequest(req, res);
-            } catch (err) {
-                next(err);
+        // Root endpoint handles both GET (health/info) and POST/GET (MCP)
+        // StreamableHTTPServerTransport handles GET / for SSE and POST / for messages
+        // when mounted at a single path.
+        app.all("/", async (req, res, next) => {
+            if (req.method === "GET" && req.headers.accept !== "text/event-stream") {
+                return res.send("Hyblock Capital MCP Server is running. Connect to this URL in Claude.ai.");
             }
-        });
-
-        app.post("/messages", async (req, res, next) => {
             try {
                 await transport.handleRequest(req, res, req.body);
             } catch (err) {
                 next(err);
             }
         });
+
+        // Backward compatibility
+        app.all("/sse", (req, res) => res.redirect(301, "/"));
+        app.all("/messages", (req, res) => res.redirect(301, "/"));
 
         // Global error handler
         app.use((err: any, req: any, res: any, next: any) => {
