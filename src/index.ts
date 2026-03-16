@@ -1,11 +1,9 @@
-#!/usr/bin/env node
-
+import express from "express";
+import cors from "cors";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import crypto from "crypto";
 import "dotenv/config";
 
 import { createApiClient } from "./auth.js";
@@ -22,6 +20,13 @@ if (!HAS_CREDS) {
     console.error("Error: HYBLOCK_CLIENT_ID, HYBLOCK_CLIENT_SECRET, and HYBLOCK_API_KEY must be set.");
     process.exit(1);
 }
+
+interface SessionData {
+    server: McpServer;
+    transport: StreamableHTTPServerTransport;
+}
+
+const sessions: Record<string, SessionData> = {};
 
 function getClient() {
     return createApiClient(CLIENT_ID, CLIENT_SECRET, API_KEY);
@@ -145,163 +150,203 @@ const HEATMAP_SCHEMA = {
     leverage: z.enum(["l1", "l2", "l3", "l4", "l5", "all"]).optional(),
 };
 
-const server = new McpServer({
-    name: "hyblock-mcp-server",
-    version: "1.0.0"
-});
+function createMcpServer(): McpServer {
+    const server = new McpServer({
+        name: "hyblock-mcp-server",
+        version: "1.0.0"
+    });
 
-server.registerTool("hyblock_ping", z.object({}).describe("Check Hyblock API health."), async () => toolHandler(H.ping, {}));
-server.registerTool("hyblock_catalog", z.object({}).describe("Discovery for available coins/exchanges."), async () => toolHandler(H.getCatalog, {}));
-server.registerTool("hyblock_data_availability", z.object({
-    endpointName: z.string().describe("e.g. klines"),
-    coin: z.string(),
-    exchange: z.string().optional(),
-}).describe("Check historical range."), async (args: any) => toolHandler(H.getDataAvailability, args));
+    server.registerTool("hyblock_ping", z.object({}).describe("Check Hyblock API health."), async () => toolHandler(H.ping, {}));
+    server.registerTool("hyblock_catalog", z.object({}).describe("Discovery for available coins/exchanges."), async () => toolHandler(H.getCatalog, {}));
+    server.registerTool("hyblock_data_availability", z.object({
+        endpointName: z.string().describe("e.g. klines"),
+        coin: z.string(),
+        exchange: z.string().optional(),
+    }).describe("Check historical range."), async (args: any) => toolHandler(H.getDataAvailability, args));
 
-[
-    { name: "hyblock_klines", fn: H.getKlines },
-    { name: "hyblock_buy_volume", fn: H.getBuyVolume },
-    { name: "hyblock_sell_volume", fn: H.getSellVolume },
-    { name: "hyblock_volume_delta", fn: H.getVolumeDelta },
-    { name: "hyblock_volume_ratio", fn: H.getVolumeRatio },
-    { name: "hyblock_bot_tracker", fn: H.getBotTracker },
-    { name: "hyblock_slippage", fn: H.getSlippage },
-    { name: "hyblock_transfer_of_contracts", fn: H.getTransferOfContracts },
-    { name: "hyblock_participation_ratio", fn: H.getParticipationRatio },
-    { name: "hyblock_market_order_count", fn: H.getMarketOrderCount },
-    { name: "hyblock_market_order_average_size", fn: H.getMarketOrderAverageSize },
-    { name: "hyblock_limit_order_count", fn: H.getLimitOrderCount },
-    { name: "hyblock_limit_order_average_size", fn: H.getLimitOrderAverageSize },
-    { name: "hyblock_buy_sell_trade_count_ratio", fn: H.getBuySellTradeCountRatio },
-    { name: "hyblock_limit_order_count_ratio", fn: H.getLimitOrderCountRatio },
-    { name: "hyblock_market_order_count_ratio", fn: H.getMarketOrderCountRatio },
-    { name: "hyblock_pd_levels", fn: H.getPdLevels },
-].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
+    [
+        { name: "hyblock_klines", fn: H.getKlines },
+        { name: "hyblock_buy_volume", fn: H.getBuyVolume },
+        { name: "hyblock_sell_volume", fn: H.getSellVolume },
+        { name: "hyblock_volume_delta", fn: H.getVolumeDelta },
+        { name: "hyblock_volume_ratio", fn: H.getVolumeRatio },
+        { name: "hyblock_bot_tracker", fn: H.getBotTracker },
+        { name: "hyblock_slippage", fn: H.getSlippage },
+        { name: "hyblock_transfer_of_contracts", fn: H.getTransferOfContracts },
+        { name: "hyblock_participation_ratio", fn: H.getParticipationRatio },
+        { name: "hyblock_market_order_count", fn: H.getMarketOrderCount },
+        { name: "hyblock_market_order_average_size", fn: H.getMarketOrderAverageSize },
+        { name: "hyblock_limit_order_count", fn: H.getLimitOrderCount },
+        { name: "hyblock_limit_order_average_size", fn: H.getLimitOrderAverageSize },
+        { name: "hyblock_buy_sell_trade_count_ratio", fn: H.getBuySellTradeCountRatio },
+        { name: "hyblock_limit_order_count_ratio", fn: H.getLimitOrderCountRatio },
+        { name: "hyblock_market_order_count_ratio", fn: H.getMarketOrderCountRatio },
+        { name: "hyblock_pd_levels", fn: H.getPdLevels },
+    ].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-server.registerTool("hyblock_anchored_cvd", z.object(AnchorSchema).describe("Anchored CVD."), async (args: any) => toolHandler(H.getAnchoredCVD, args, "anchoredCVD"));
-server.registerTool("hyblock_exchange_premium", z.object({
-    coin: z.string(),
-    exchange1: z.string(),
-    exchange2: z.string(),
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]),
-    mode: z.enum(["standard", "percentage"]),
-}).describe("Exchange premium."), async (args: any) => toolHandler(H.getExchangePremium, args));
+    server.registerTool("hyblock_anchored_cvd", z.object(AnchorSchema).describe("Anchored CVD."), async (args: any) => toolHandler(H.getAnchoredCVD, args, "anchoredCVD"));
+    server.registerTool("hyblock_exchange_premium", z.object({
+        coin: z.string(),
+        exchange1: z.string(),
+        exchange2: z.string(),
+        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]),
+        mode: z.enum(["standard", "percentage"]),
+    }).describe("Exchange premium."), async (args: any) => toolHandler(H.getExchangePremium, args));
 
-server.registerTool("hyblock_funding_rate", z.object(CoinTimeframeSchema).describe("Funding rate."), async (args: any) => toolHandler(H.getFundingRate, args, "fundingRate"));
+    server.registerTool("hyblock_funding_rate", z.object(CoinTimeframeSchema).describe("Funding rate."), async (args: any) => toolHandler(H.getFundingRate, args, "fundingRate"));
 
-[
-    { name: "hyblock_top_trader_accounts", fn: H.getTopTraderAccounts },
-    { name: "hyblock_top_trader_positions", fn: H.getTopTraderPositions },
-    { name: "hyblock_global_accounts", fn: H.getGlobalAccounts },
-    { name: "hyblock_net_long_short", fn: H.getNetLongShort },
-    { name: "hyblock_whale_retail_delta", fn: H.getWhaleRetailDelta },
-    { name: "hyblock_trader_sentiment_gap", fn: H.getTraderSentimentGap },
-].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
+    [
+        { name: "hyblock_top_trader_accounts", fn: H.getTopTraderAccounts },
+        { name: "hyblock_top_trader_positions", fn: H.getTopTraderPositions },
+        { name: "hyblock_global_accounts", fn: H.getGlobalAccounts },
+        { name: "hyblock_net_long_short", fn: H.getNetLongShort },
+        { name: "hyblock_whale_retail_delta", fn: H.getWhaleRetailDelta },
+        { name: "hyblock_trader_sentiment_gap", fn: H.getTraderSentimentGap },
+    ].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-server.registerTool("hyblock_combined_book", z.object(CoinTimeframeSchema).describe("Combined book."), async (args: any) => toolHandler(H.getCombinedBook, args));
-[
-    { name: "hyblock_bid_ask", fn: H.getBidAsk },
-    { name: "hyblock_bid_ask_ratio", fn: H.getBidAskRatio },
-    { name: "hyblock_bid_ask_delta", fn: H.getBidAskDelta },
-    { name: "hyblock_market_imbalance_index", fn: H.getMarketImbalanceIndex },
-].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
+    server.registerTool("hyblock_combined_book", z.object(CoinTimeframeSchema).describe("Combined book."), async (args: any) => toolHandler(H.getCombinedBook, args));
+    [
+        { name: "hyblock_bid_ask", fn: H.getBidAsk },
+        { name: "hyblock_bid_ask_ratio", fn: H.getBidAskRatio },
+        { name: "hyblock_bid_ask_delta", fn: H.getBidAskDelta },
+        { name: "hyblock_market_imbalance_index", fn: H.getMarketImbalanceIndex },
+    ].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-server.registerTool("hyblock_global_bid_ask_ratio", z.object(CoinTimeframeSchema).describe("Global BA ratio."), async (args: any) => toolHandler(H.getGlobalBidAskRatio, args));
-server.registerTool("hyblock_global_combined_book", z.object(CoinTimeframeSchema).describe("Global combined book."), async (args: any) => toolHandler(H.getGlobalCombinedBook, args));
+    server.registerTool("hyblock_global_bid_ask_ratio", z.object(CoinTimeframeSchema).describe("Global BA ratio."), async (args: any) => toolHandler(H.getGlobalBidAskRatio, args));
+    server.registerTool("hyblock_global_combined_book", z.object(CoinTimeframeSchema).describe("Global combined book."), async (args: any) => toolHandler(H.getGlobalCombinedBook, args));
 
-server.registerTool("hyblock_open_interest", z.object(CoinTimeframeSchema).describe("OI."), async (args: any) => toolHandler(H.getOpenInterest, args));
-server.registerTool("hyblock_open_interest_delta", z.object(CoinTimeframeSchema).describe("OI delta."), async (args: any) => toolHandler(H.getOpenInterestDelta, args));
+    server.registerTool("hyblock_open_interest", z.object(CoinTimeframeSchema).describe("OI."), async (args: any) => toolHandler(H.getOpenInterest, args));
+    server.registerTool("hyblock_open_interest_delta", z.object(CoinTimeframeSchema).describe("OI delta."), async (args: any) => toolHandler(H.getOpenInterestDelta, args));
 
-server.registerTool("hyblock_bvol", z.object(CommonSchema).describe("BVOL."), async (args: any) => toolHandler(H.getBvol, args));
-server.registerTool("hyblock_dvol", z.object(CommonSchema).describe("DVOL."), async (args: any) => toolHandler(H.getDvol, args));
+    server.registerTool("hyblock_bvol", z.object(CommonSchema).describe("BVOL."), async (args: any) => toolHandler(H.getBvol, args));
+    server.registerTool("hyblock_dvol", z.object(CommonSchema).describe("DVOL."), async (args: any) => toolHandler(H.getDvol, args));
 
-server.registerTool("hyblock_margin_lending_ratio", z.object(CommonSchema).describe("Margin lending ratio."), async (args: any) => toolHandler(H.getMarginLendingRatio, args));
-server.registerTool("hyblock_user_bot_ratio", z.object(CommonSchema).describe("User bot ratio."), async (args: any) => toolHandler(H.getUserBotRatio, args));
+    server.registerTool("hyblock_margin_lending_ratio", z.object(CommonSchema).describe("Margin lending ratio."), async (args: any) => toolHandler(H.getMarginLendingRatio, args));
+    server.registerTool("hyblock_user_bot_ratio", z.object(CommonSchema).describe("User bot ratio."), async (args: any) => toolHandler(H.getUserBotRatio, args));
 
-server.registerTool("hyblock_liquidation", z.object(CommonSchema).describe("Liquidations."), async (args: any) => toolHandler(H.getLiquidation, args));
-server.registerTool("hyblock_liq_levels_count", z.object(CommonSchema).describe("Liq levels count."), async (args: any) => toolHandler(H.getLiqLevelsCount, args));
-server.registerTool("hyblock_liq_levels_size", z.object(CommonSchema).describe("Liq levels size."), async (args: any) => toolHandler(H.getLiqLevelsSize, args));
-server.registerTool("hyblock_liquidation_heatmap", z.object(HEATMAP_SCHEMA).describe("Heatmap."), async (args: any) => toolHandler(H.getLiquidationHeatmap, args, "liquidationHeatmap"));
+    server.registerTool("hyblock_liquidation", z.object(CommonSchema).describe("Liquidations."), async (args: any) => toolHandler(H.getLiquidation, args));
+    server.registerTool("hyblock_liq_levels_count", z.object(CommonSchema).describe("Liq levels count."), async (args: any) => toolHandler(H.getLiqLevelsCount, args));
+    server.registerTool("hyblock_liq_levels_size", z.object(CommonSchema).describe("Liq levels size."), async (args: any) => toolHandler(H.getLiqLevelsSize, args));
+    server.registerTool("hyblock_liquidation_heatmap", z.object(HEATMAP_SCHEMA).describe("Heatmap."), async (args: any) => toolHandler(H.getLiquidationHeatmap, args, "liquidationHeatmap"));
 
-[
-    { name: "hyblock_net_long_short_delta", fn: H.getNetLongShortDelta },
-    { name: "hyblock_true_retail_long_short", fn: H.getTrueRetailLongShort },
-    { name: "hyblock_bid_ask_ratio_diff", fn: H.getBidAskRatioDiff },
-    { name: "hyblock_bids_increase_decrease", fn: H.getBidsIncreaseDecrease },
-    { name: "hyblock_asks_increase_decrease", fn: H.getAsksIncreaseDecrease },
-    { name: "hyblock_best_bid_ask", fn: H.getBestBidAsk },
-    { name: "hyblock_top_trader_margin_used", fn: H.getTopTraderMarginUsed },
-    { name: "hyblock_top_trader_margin_used_delta", fn: H.getTopTraderMarginUsedDelta },
-].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
+    [
+        { name: "hyblock_net_long_short_delta", fn: H.getNetLongShortDelta },
+        { name: "hyblock_true_retail_long_short", fn: H.getTrueRetailLongShort },
+        { name: "hyblock_bid_ask_ratio_diff", fn: H.getBidAskRatioDiff },
+        { name: "hyblock_bids_increase_decrease", fn: H.getBidsIncreaseDecrease },
+        { name: "hyblock_asks_increase_decrease", fn: H.getAsksIncreaseDecrease },
+        { name: "hyblock_best_bid_ask", fn: H.getBestBidAsk },
+        { name: "hyblock_top_trader_margin_used", fn: H.getTopTraderMarginUsed },
+        { name: "hyblock_top_trader_margin_used_delta", fn: H.getTopTraderMarginUsedDelta },
+    ].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-server.registerTool("hyblock_liquidation_levels_tv", z.object(LIQ_LVL_SCHEMA).describe("Liq levels TV."), async (args: any) => toolHandler(H.getLiquidationLevelsTV, args, "liquidationLevelsTV"));
-server.registerTool("hyblock_liquidation_levels", z.object(LIQ_LVL_SCHEMA).describe("Liq levels."), async (args: any) => toolHandler(H.getLiquidationLevels, args, "liquidationLevels"));
-server.registerTool("hyblock_cumulative_liq_level", z.object(LIQ_LVL_SCHEMA).describe("Cumulative liq level."), async (args: any) => toolHandler(H.getCumulativeLiqLevel, args, "cumulativeLiqLevel"));
+    server.registerTool("hyblock_liquidation_levels_tv", z.object(LIQ_LVL_SCHEMA).describe("Liq levels TV."), async (args: any) => toolHandler(H.getLiquidationLevelsTV, args, "liquidationLevelsTV"));
+    server.registerTool("hyblock_liquidation_levels", z.object(LIQ_LVL_SCHEMA).describe("Liq levels."), async (args: any) => toolHandler(H.getLiquidationLevels, args, "liquidationLevels"));
+    server.registerTool("hyblock_cumulative_liq_level", z.object(LIQ_LVL_SCHEMA).describe("Cumulative liq level."), async (args: any) => toolHandler(H.getCumulativeLiqLevel, args, "cumulativeLiqLevel"));
 
-[
-    { name: "hyblock_anchored_top_trader_accounts", fn: H.getAnchoredTopTraderAccounts },
-    { name: "hyblock_anchored_top_trader_positions", fn: H.getAnchoredTopTraderPositions },
-    { name: "hyblock_anchored_global_accounts", fn: H.getAnchoredGlobalAccounts },
-    { name: "hyblock_anchored_whale_retail_delta", fn: H.getAnchoredWhaleRetailDelta },
-].forEach(t => server.registerTool(t.name, z.object(AnchorSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
+    [
+        { name: "hyblock_anchored_top_trader_accounts", fn: H.getAnchoredTopTraderAccounts },
+        { name: "hyblock_anchored_top_trader_positions", fn: H.getAnchoredTopTraderPositions },
+        { name: "hyblock_anchored_global_accounts", fn: H.getAnchoredGlobalAccounts },
+        { name: "hyblock_anchored_whale_retail_delta", fn: H.getAnchoredWhaleRetailDelta },
+    ].forEach(t => server.registerTool(t.name, z.object(AnchorSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-[
-    { name: "hyblock_global_bid_ask", fn: H.getGlobalBidAsk },
-    { name: "hyblock_global_bid_ask_delta", fn: H.getGlobalBidAskDelta },
-    { name: "hyblock_global_bid_ask_ratio_increase_decrease", fn: H.getGlobalBidAskRatioIncreaseDecrease },
-    { name: "hyblock_global_bids_increase_decrease", fn: H.getGlobalBidsIncreaseDecrease },
-    { name: "hyblock_global_asks_increase_decrease", fn: H.getGlobalAsksIncreaseDecrease },
-].forEach(t => server.registerTool(t.name, z.object(CoinTimeframeSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
+    [
+        { name: "hyblock_global_bid_ask", fn: H.getGlobalBidAsk },
+        { name: "hyblock_global_bid_ask_delta", fn: H.getGlobalBidAskDelta },
+        { name: "hyblock_global_bid_ask_ratio_increase_decrease", fn: H.getGlobalBidAskRatioIncreaseDecrease },
+        { name: "hyblock_global_bids_increase_decrease", fn: H.getGlobalBidsIncreaseDecrease },
+        { name: "hyblock_global_asks_increase_decrease", fn: H.getGlobalAsksIncreaseDecrease },
+    ].forEach(t => server.registerTool(t.name, z.object(CoinTimeframeSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-server.registerTool("hyblock_leaderboard_notional_profit", z.object({
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]),
-    limit: z.coerce.number().optional()
-}).describe("Leaderboard."), async (args: any) => toolHandler(H.getLeaderboardNotionalProfit, args, "leaderboardNotionalProfit"));
+    server.registerTool("hyblock_leaderboard_notional_profit", z.object({
+        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]),
+        limit: z.coerce.number().optional()
+    }).describe("Leaderboard."), async (args: any) => toolHandler(H.getLeaderboardNotionalProfit, args, "leaderboardNotionalProfit"));
 
-server.registerTool("hyblock_wbtc_mint_burn", z.object({
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]),
-    limit: z.coerce.number().optional()
-}).describe("WBTC Mint/Burn."), async (args: any) => toolHandler(H.getWbtcMintBurn, args, "wbtcMintBurn"));
+    server.registerTool("hyblock_wbtc_mint_burn", z.object({
+        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]),
+        limit: z.coerce.number().optional()
+    }).describe("WBTC Mint/Burn."), async (args: any) => toolHandler(H.getWbtcMintBurn, args, "wbtcMintBurn"));
 
-async function main() {
-    if (PORT) {
-        const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => crypto.randomUUID(),
-        });
-
-        const httpServer = createServer(async (req, res) => {
-            if (req.method === "GET" && req.url === "/health") {
-                res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ status: "ok" }));
-                return;
-            }
-
-            let body: any = undefined;
-            if (req.method === "POST" && req.url === "/messages") {
-                body = await new Promise((resolve) => {
-                    let data = "";
-                    req.on("data", chunk => data += chunk);
-                    req.on("end", () => {
-                        try { resolve(JSON.parse(data)); } catch { resolve(undefined); }
-                    });
-                });
-            }
-
-            try {
-                await transport.handleRequest(req, res, body);
-            } catch (err) {
-                console.error("Transport error:", err);
-                if (!res.headersSent) res.writeHead(500).end();
-            }
-        });
-
-        await server.connect(transport);
-        httpServer.listen(Number(PORT), "0.0.0.0", () => {
-            console.log(`Hyblock MCP Server v1.0.0 listening on port ${PORT}`);
-        });
-    } else {
-        const transport = new StdioServerTransport();
-        await server.connect(transport);
-    }
+    return server;
 }
 
-main().catch(console.error);
+const app = express();
+
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "mcp-session-id"],
+    exposedHeaders: ["mcp-session-id"],
+}));
+
+app.use(express.json());
+
+app.get("/health", (req, res) => {
+    res.json({ status: "ok" });
+});
+
+app.post("/mcp", async (req: express.Request, res: express.Response) => {
+    const sessionId = req.headers["mcp-session-id"] as string;
+    const existingSession = sessionId && sessions[sessionId];
+
+    if (existingSession) {
+        try {
+            await existingSession.transport.handleRequest(req, res, req.body);
+        } catch (err) {
+            console.error("Transport error:", err);
+            if (!res.headersSent) {
+                res.status(500).json({ jsonrpc: "2.0", error: { code: -32000, message: "Internal server error" }, id: null });
+            }
+        }
+        return;
+    }
+
+    const newSessionId = randomUUID();
+    const server = createMcpServer();
+    const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => newSessionId,
+        onsessioninitialized: (session) => {
+            sessions[newSessionId] = { server, transport };
+            res.setHeader("mcp-session-id", newSessionId);
+        }
+    });
+
+    try {
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+        
+        if (!res.headersSent) {
+            res.setHeader("mcp-session-id", newSessionId);
+        }
+    } catch (err) {
+        console.error("Transport error:", err);
+        if (!res.headersSent) {
+            res.status(500).json({ jsonrpc: "2.0", error: { code: -32000, message: "Internal server error" }, id: null });
+        }
+    }
+});
+
+app.get("/mcp", async (req: express.Request, res: express.Response) => {
+    const sessionId = req.headers["mcp-session-id"] as string;
+    const session = sessionId && sessions[sessionId];
+
+    if (!session) {
+        res.status(400).json({ jsonrpc: "2.0", error: { code: -32000, message: "No valid session ID provided" }, id: null });
+        return;
+    }
+
+    try {
+        await session.transport.handleRequest(req, res);
+    } catch (err) {
+        console.error("Transport error:", err);
+        if (!res.headersSent) {
+            res.status(500).json({ jsonrpc: "2.0", error: { code: -32000, message: "Internal server error" }, id: null });
+        }
+    }
+});
+
+app.listen(Number(PORT), "0.0.0.0", () => {
+    console.log(`Hyblock MCP Server v1.0.0 listening on port ${PORT}`);
+});
