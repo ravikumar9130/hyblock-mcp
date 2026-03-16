@@ -152,9 +152,19 @@ const LIQ_LVL_SCHEMA = z.object({
 const HEATMAP_SCHEMA = z.object({
     coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
     exchange: z.string().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
-    lookback: z.coerce.number().optional(),
+    lookback: z.string().optional().describe("Lookback period (e.g. 1d, 7d, 1m, 30m, 4h)."),
     leverage: z.enum(["l1", "l2", "l3", "l4", "l5", "all"]).optional(),
 }).describe("Heatmap parameters");
+
+const MarginUsedSchema = z.object({
+    coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
+    exchange: z.string().describe("Exchange identifier (e.g. bybit_perp_coin, bybit_perp_stable). Note: binance_perp_stable not supported."),
+    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
+    limit: z.coerce.number().optional(),
+    startTime: z.coerce.number().optional(),
+    endTime: z.coerce.number().optional(),
+    sort: z.enum(["asc", "desc"]).optional(),
+}).describe("Margin used parameters (exchange must be supported, e.g. bybit_perp_coin).");
 
 const tools = [
     { name: "hyblock_ping", schema: z.object({}), fn: H.ping, desc: "Check Hyblock API health." },
@@ -219,8 +229,8 @@ const tools = [
     { name: "hyblock_bids_increase_decrease", schema: CommonSchema, fn: H.getBidsIncreaseDecrease, endpoint: "bidsIncreaseDecrease", desc: "Bids increase/decrease." },
     { name: "hyblock_asks_increase_decrease", schema: CommonSchema, fn: H.getAsksIncreaseDecrease, endpoint: "asksIncreaseDecrease", desc: "Asks increase/decrease." },
     { name: "hyblock_best_bid_ask", schema: CommonSchema, fn: H.getBestBidAsk, endpoint: "bestBidAsk", desc: "Best bid/ask." },
-    { name: "hyblock_top_trader_margin_used", schema: CommonSchema, fn: H.getTopTraderMarginUsed, endpoint: "topTraderMarginUsed", desc: "Top trader margin used." },
-    { name: "hyblock_top_trader_margin_used_delta", schema: CommonSchema, fn: H.getTopTraderMarginUsedDelta, endpoint: "topTraderMarginUsedDelta", desc: "Top trader margin used delta." },
+    { name: "hyblock_top_trader_margin_used", schema: MarginUsedSchema, fn: H.getTopTraderMarginUsed, endpoint: "topTraderMarginUsed", desc: "Top trader margin used." },
+    { name: "hyblock_top_trader_margin_used_delta", schema: MarginUsedSchema, fn: H.getTopTraderMarginUsedDelta, endpoint: "topTraderMarginUsedDelta", desc: "Top trader margin used delta." },
     { name: "hyblock_liquidation_levels_tv", schema: LIQ_LVL_SCHEMA, fn: H.getLiquidationLevelsTV, endpoint: "liquidationLevelsTV", desc: "Liquidation levels TV." },
     { name: "hyblock_liquidation_levels", schema: LIQ_LVL_SCHEMA, fn: H.getLiquidationLevels, endpoint: "liquidationLevels", desc: "Liquidation levels." },
     { name: "hyblock_cumulative_liq_level", schema: LIQ_LVL_SCHEMA, fn: H.getCumulativeLiqLevel, endpoint: "cumulativeLiqLevel", desc: "Cumulative liquidation level." },
