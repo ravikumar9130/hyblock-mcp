@@ -296,7 +296,7 @@ async function main() {
 
         await server.connect(transport);
         httpServer.listen(Number(PORT), "0.0.0.0", () => {
-            console.error(`Hyblock MCP Server v1.0.0 listening on port ${PORT}`);
+            console.log(`Hyblock MCP Server v1.0.0 listening on port ${PORT}`);
         });
     } else {
         const transport = new StdioServerTransport();
