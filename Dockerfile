@@ -1,35 +1,15 @@
-# --------- Stage 1: Build ---------
-FROM node:20-slim AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
-
-# Copy package files
 COPY package*.json ./
-
-# Install ALL dependencies (including typescript)
 RUN npm ci
-
-# Copy source code and build
-COPY . .
+COPY tsconfig.json ./
+COPY src/ ./src/
 RUN npm run build
 
-# --------- Stage 2: Production ---------
-FROM node:20-slim
+FROM node:22-alpine
 WORKDIR /app
-
-# Set to production mode
-ENV NODE_ENV=production
-
-# Copy package files
 COPY package*.json ./
-
-# Install ONLY production dependencies!
 RUN npm ci --omit=dev
-
-# Copy the compiled "dist" folder from the builder stage
 COPY --from=builder /app/dist ./dist
-
-# Railway will inject its own PORT, but setting a default is fine
-ENV PORT=8080
-EXPOSE 8080
-
+EXPOSE 3000
 CMD ["node", "dist/index.js"]

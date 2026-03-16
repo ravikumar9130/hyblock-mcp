@@ -1,25 +1,15 @@
 #!/usr/bin/env node
-/**
- * Hyblock Capital MCP Server
- *
- * Exposes all Hyblock Capital API endpoints as MCP tools.
- * Required environment variables:
- *   HYBLOCK_CLIENT_ID, HYBLOCK_CLIENT_SECRET, HYBLOCK_API_KEY
- */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createServer } from "node:http";
 import { z } from "zod";
-import express from "express";
-import cors from "cors";
 import crypto from "crypto";
 import "dotenv/config";
 
 import { createApiClient } from "./auth.js";
 import * as H from "./hyblock.js";
-
-// ─── Config ───────────────────────────────────────────────────────────────────
 
 const CLIENT_ID = process.env.HYBLOCK_CLIENT_ID ?? "";
 const CLIENT_SECRET = process.env.HYBLOCK_CLIENT_SECRET ?? "";
@@ -33,8 +23,6 @@ if (!HAS_CREDS) {
     process.exit(1);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function getClient() {
     return createApiClient(CLIENT_ID, CLIENT_SECRET, API_KEY);
 }
@@ -42,24 +30,20 @@ function getClient() {
 function normalizeParams<T>(args: any): T {
     const p = { ...args };
 
-    // Handle symbols/coins
     if (p.symbol && !p.coin) p.coin = p.symbol;
     if (p.coin) {
         p.coin = p.coin.toLowerCase();
         p.coin = p.coin.replace(/usdt$|perp$/i, "");
     }
 
-    // Handle timeframes
     if (p.interval && !p.timeframe) p.timeframe = p.interval;
     if (!p.timeframe && (p.coin || p.exchange)) p.timeframe = "1h";
 
-    // Handle anchor
     if (p.anchorTime && !p.anchor) p.anchor = p.anchorTime;
 
-    // Mapping for common exchange names/aliases
     const mapExchange = (ex: string) => {
         ex = ex.toLowerCase();
-        if (ex.includes("_")) return ex; // Already a full identifier
+        if (ex.includes("_")) return ex;
         if (ex === "binance") return "binance_perp_stable";
         if (ex === "bybit") return "bybit_perp_stable";
         if (ex === "okx") return "okx_perp_stable";
@@ -73,21 +57,14 @@ function normalizeParams<T>(args: any): T {
     if (p.exchange1) p.exchange1 = mapExchange(p.exchange1);
     if (p.exchange2) p.exchange2 = mapExchange(p.exchange2);
 
-    // Standardize mode
     if (p.mode) {
         if (p.mode === "standard" || p.mode === "price") p.mode = "standard";
         else if (p.mode === "percentage" || p.mode === "percent") p.mode = "percentage";
     }
 
-    // Stripping disallowed fields
     delete p.symbol;
     delete p.interval;
     delete p.anchorTime;
-
-    // Hyblock v2 is very strict. Some endpoints REJECT extra params like timeframe/limit.
-    const noTimeframeEndpoints = ["/liquidationHeatmap", "/cumulativeLiqLevel", "/liquidationLevels", "/liquidationLevelsTV"];
-    // Note: This check is done in toolHandler usually, but we can do it here if we pass the context.
-    // For now, we'll let the toolHandler or specific schemas handle it.
 
     return p as T;
 }
@@ -97,7 +74,6 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
         const client = await getClient();
         const params = normalizeParams(args);
 
-        // Final stripping for strict endpoints
         const name = endpoint?.toLowerCase();
         if (name?.includes("liq") || name?.includes("heatmap")) {
             delete (params as any).timeframe;
@@ -117,20 +93,18 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
 
         let hint = "";
         if (status === 401 || status === 403) {
-            hint =
-                "\nHint: Check that HYBLOCK_CLIENT_ID, HYBLOCK_CLIENT_SECRET, and HYBLOCK_API_KEY are correctly set in the server environment, and that your MCP client is using the /sse endpoint.";
+            hint = "\nHint: Check that HYBLOCK_CLIENT_ID, HYBLOCK_CLIENT_SECRET, and HYBLOCK_API_KEY are correctly set.";
         }
 
         return {
             content: [{
                 type: "text" as const,
-                text: `❌ API Error (${status || "Unknown"}): ${errMsg}. ${details ? `\nDetails: ${details}` : ""}${hint}`
-            }]
+                text: `Error (${status || "Unknown"}): ${errMsg}. ${details ? `\nDetails: ${details}` : ""}${hint}`
+            }],
+            isError: true
         };
     }
 }
-
-// ─── Zod Schemas ──────────────────────────────────────────────────────────────
 
 const CommonSchema = {
     coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
@@ -171,14 +145,10 @@ const HEATMAP_SCHEMA = {
     leverage: z.enum(["l1", "l2", "l3", "l4", "l5", "all"]).optional(),
 };
 
-// ─── MCP Server ───────────────────────────────────────────────────────────────
-
 const server = new McpServer({
     name: "hyblock-mcp-server",
     version: "1.0.0"
 });
-
-// ─── Tool Registrations ───────────────────────────────────────────────────────
 
 server.registerTool("hyblock_ping", z.object({}).describe("Check Hyblock API health."), async () => toolHandler(H.ping, {}));
 server.registerTool("hyblock_catalog", z.object({}).describe("Discovery for available coins/exchanges."), async () => toolHandler(H.getCatalog, {}));
@@ -188,7 +158,6 @@ server.registerTool("hyblock_data_availability", z.object({
     exchange: z.string().optional(),
 }).describe("Check historical range."), async (args: any) => toolHandler(H.getDataAvailability, args));
 
-// Orderflow
 [
     { name: "hyblock_klines", fn: H.getKlines },
     { name: "hyblock_buy_volume", fn: H.getBuyVolume },
@@ -220,7 +189,6 @@ server.registerTool("hyblock_exchange_premium", z.object({
 
 server.registerTool("hyblock_funding_rate", z.object(CoinTimeframeSchema).describe("Funding rate."), async (args: any) => toolHandler(H.getFundingRate, args, "fundingRate"));
 
-// Sentiment
 [
     { name: "hyblock_top_trader_accounts", fn: H.getTopTraderAccounts },
     { name: "hyblock_top_trader_positions", fn: H.getTopTraderPositions },
@@ -230,7 +198,6 @@ server.registerTool("hyblock_funding_rate", z.object(CoinTimeframeSchema).descri
     { name: "hyblock_trader_sentiment_gap", fn: H.getTraderSentimentGap },
 ].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-// Orderbook
 server.registerTool("hyblock_combined_book", z.object(CoinTimeframeSchema).describe("Combined book."), async (args: any) => toolHandler(H.getCombinedBook, args));
 [
     { name: "hyblock_bid_ask", fn: H.getBidAsk },
@@ -239,7 +206,6 @@ server.registerTool("hyblock_combined_book", z.object(CoinTimeframeSchema).descr
     { name: "hyblock_market_imbalance_index", fn: H.getMarketImbalanceIndex },
 ].forEach(t => server.registerTool(t.name, z.object(CommonSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-// Global
 server.registerTool("hyblock_global_bid_ask_ratio", z.object(CoinTimeframeSchema).describe("Global BA ratio."), async (args: any) => toolHandler(H.getGlobalBidAskRatio, args));
 server.registerTool("hyblock_global_combined_book", z.object(CoinTimeframeSchema).describe("Global combined book."), async (args: any) => toolHandler(H.getGlobalCombinedBook, args));
 
@@ -252,13 +218,11 @@ server.registerTool("hyblock_dvol", z.object(CommonSchema).describe("DVOL."), as
 server.registerTool("hyblock_margin_lending_ratio", z.object(CommonSchema).describe("Margin lending ratio."), async (args: any) => toolHandler(H.getMarginLendingRatio, args));
 server.registerTool("hyblock_user_bot_ratio", z.object(CommonSchema).describe("User bot ratio."), async (args: any) => toolHandler(H.getUserBotRatio, args));
 
-// Liq
 server.registerTool("hyblock_liquidation", z.object(CommonSchema).describe("Liquidations."), async (args: any) => toolHandler(H.getLiquidation, args));
 server.registerTool("hyblock_liq_levels_count", z.object(CommonSchema).describe("Liq levels count."), async (args: any) => toolHandler(H.getLiqLevelsCount, args));
 server.registerTool("hyblock_liq_levels_size", z.object(CommonSchema).describe("Liq levels size."), async (args: any) => toolHandler(H.getLiqLevelsSize, args));
 server.registerTool("hyblock_liquidation_heatmap", z.object(HEATMAP_SCHEMA).describe("Heatmap."), async (args: any) => toolHandler(H.getLiquidationHeatmap, args, "liquidationHeatmap"));
 
-// Extension tools
 [
     { name: "hyblock_net_long_short_delta", fn: H.getNetLongShortDelta },
     { name: "hyblock_true_retail_long_short", fn: H.getTrueRetailLongShort },
@@ -274,7 +238,6 @@ server.registerTool("hyblock_liquidation_levels_tv", z.object(LIQ_LVL_SCHEMA).de
 server.registerTool("hyblock_liquidation_levels", z.object(LIQ_LVL_SCHEMA).describe("Liq levels."), async (args: any) => toolHandler(H.getLiquidationLevels, args, "liquidationLevels"));
 server.registerTool("hyblock_cumulative_liq_level", z.object(LIQ_LVL_SCHEMA).describe("Cumulative liq level."), async (args: any) => toolHandler(H.getCumulativeLiqLevel, args, "cumulativeLiqLevel"));
 
-// Anchored tools
 [
     { name: "hyblock_anchored_top_trader_accounts", fn: H.getAnchoredTopTraderAccounts },
     { name: "hyblock_anchored_top_trader_positions", fn: H.getAnchoredTopTraderPositions },
@@ -282,7 +245,6 @@ server.registerTool("hyblock_cumulative_liq_level", z.object(LIQ_LVL_SCHEMA).des
     { name: "hyblock_anchored_whale_retail_delta", fn: H.getAnchoredWhaleRetailDelta },
 ].forEach(t => server.registerTool(t.name, z.object(AnchorSchema).describe(t.name), async (args: any) => toolHandler(t.fn, args, t.name.replace("hyblock_", ""))));
 
-// Global BA specific
 [
     { name: "hyblock_global_bid_ask", fn: H.getGlobalBidAsk },
     { name: "hyblock_global_bid_ask_delta", fn: H.getGlobalBidAskDelta },
@@ -301,31 +263,41 @@ server.registerTool("hyblock_wbtc_mint_burn", z.object({
     limit: z.coerce.number().optional()
 }).describe("WBTC Mint/Burn."), async (args: any) => toolHandler(H.getWbtcMintBurn, args, "wbtcMintBurn"));
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-
 async function main() {
     if (PORT) {
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => crypto.randomUUID(),
         });
-        const app = express();
-        app.use(cors({ origin: "*" }));
-        app.use(express.json());
-        app.all("/", async (req, res, next) => {
-            if (req.method === "GET" && req.headers.accept !== "text/event-stream") {
-                return res.send("Hyblock Capital MCP Server is running.");
+
+        const httpServer = createServer(async (req, res) => {
+            if (req.method === "GET" && req.url === "/health") {
+                res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ status: "ok" }));
+                return;
             }
-            try { await transport.handleRequest(req, res, req.body); } catch (err) { next(err); }
+
+            let body: any = undefined;
+            if (req.method === "POST" && req.url === "/messages") {
+                body = await new Promise((resolve) => {
+                    let data = "";
+                    req.on("data", chunk => data += chunk);
+                    req.on("end", () => {
+                        try { resolve(JSON.parse(data)); } catch { resolve(undefined); }
+                    });
+                });
+            }
+
+            try {
+                await transport.handleRequest(req, res, body);
+            } catch (err) {
+                console.error("Transport error:", err);
+                if (!res.headersSent) res.writeHead(500).end();
+            }
         });
-        app.get("/sse", async (req, res, next) => {
-            try { await transport.handleRequest(req, res, req.body); } catch (err) { next(err); }
-        });
-        app.post("/messages", async (req, res, next) => {
-            try { await transport.handleRequest(req, res, req.body); } catch (err) { next(err); }
-        });
+
         await server.connect(transport);
-        const port = parseInt(PORT);
-        app.listen(port, "0.0.0.0", () => console.log(`HTTP Server running on port ${port}`));
+        httpServer.listen(Number(PORT), "0.0.0.0", () => {
+            console.error(`Hyblock MCP Server v1.0.0 listening on port ${PORT}`);
+        });
     } else {
         const transport = new StdioServerTransport();
         await server.connect(transport);
