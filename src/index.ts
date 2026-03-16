@@ -14,7 +14,7 @@ import * as H from "./hyblock.js";
 const CLIENT_ID = process.env.HYBLOCK_CLIENT_ID ?? "";
 const CLIENT_SECRET = process.env.HYBLOCK_CLIENT_SECRET ?? "";
 const API_KEY = process.env.HYBLOCK_API_KEY ?? "";
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || "3000";
 
 const HAS_CREDS = !!(CLIENT_ID && CLIENT_SECRET && API_KEY);
 
