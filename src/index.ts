@@ -14,6 +14,7 @@ import { z } from "zod";
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
+import "dotenv/config";
 
 import { createApiClient } from "./auth.js";
 import * as H from "./hyblock.js";
