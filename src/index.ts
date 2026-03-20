@@ -32,22 +32,54 @@ function getClient() {
     return createApiClient(CLIENT_ID, CLIENT_SECRET, API_KEY);
 }
 
+// Valid limit values accepted by Hyblock API
+const VALID_LIMITS = [5, 10, 20, 50, 100, 500, 1000];
+
+function normalizeLimit(limit: number | undefined): number | undefined {
+    if (limit === undefined || limit === null) return undefined;
+    // Snap to nearest valid limit value
+    const n = Number(limit);
+    if (isNaN(n) || n <= 0) return 5;
+    if (n <= 5) return 5;
+    if (n <= 10) return 10;
+    if (n <= 20) return 20;
+    if (n <= 50) return 50;
+    if (n <= 100) return 100;
+    if (n <= 500) return 500;
+    return 1000;
+}
+
 function normalizeParams<T>(args: any): T {
     const p = { ...args };
 
+    // Coin defaults
     if (p.symbol && !p.coin) p.coin = p.symbol;
-    if (p.coin) {
-        p.coin = p.coin.toLowerCase();
+    if (p.coin && typeof p.coin === 'string') {
+        p.coin = p.coin.toLowerCase().trim();
         p.coin = p.coin.replace(/usdt$|perp$/i, "");
     }
 
+    // Timeframe defaults
     if (p.interval && !p.timeframe) p.timeframe = p.interval;
     if (!p.timeframe && (p.coin || p.exchange)) p.timeframe = "1h";
 
+    // Anchor
     if (p.anchorTime && !p.anchor) p.anchor = p.anchorTime;
 
-    const mapExchange = (ex: string) => {
-        ex = ex.toLowerCase();
+    // Limit
+    if (p.limit !== undefined) p.limit = normalizeLimit(p.limit);
+
+    // Sort order normalization
+    if (p.sort && typeof p.sort === 'string') {
+        const s = p.sort.toLowerCase();
+        if (s.includes("asc")) p.sort = "asc";
+        else if (s.includes("desc")) p.sort = "desc";
+    }
+
+    // Exchange normalization
+    const mapExchange = (ex: any) => {
+        if (!ex || typeof ex !== 'string') return ex;
+        ex = ex.toLowerCase().trim();
         if (ex.includes("_")) return ex;
         if (ex === "binance") return "binance_perp_stable";
         if (ex === "bybit") return "bybit_perp_stable";
@@ -56,15 +88,18 @@ function normalizeParams<T>(args: any): T {
         if (ex === "gate") return "gate_perp_stable";
         if (ex === "deribit") return "deribit_perp_stable";
         if (ex === "bitmex") return "bitmex_perp_stable";
+        if (ex === "bitget") return "bitget_perp_stable";
         return ex;
     };
     if (p.exchange) p.exchange = mapExchange(p.exchange);
     if (p.exchange1) p.exchange1 = mapExchange(p.exchange1);
     if (p.exchange2) p.exchange2 = mapExchange(p.exchange2);
 
-    if (p.mode) {
-        if (p.mode === "standard" || p.mode === "price") p.mode = "standard";
-        else if (p.mode === "percentage" || p.mode === "percent") p.mode = "percentage";
+    // Mode
+    if (p.mode && typeof p.mode === 'string') {
+        const m = p.mode.toLowerCase();
+        if (m === "standard" || m === "price") p.mode = "standard";
+        else if (m.includes("percent")) p.mode = "percentage";
     }
 
     delete p.symbol;
@@ -81,9 +116,9 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
 
         const name = endpoint?.toLowerCase();
         // Only strip timeframe for heatmap and liquidation LEVELS endpoints (not liquidation/liq_levels)
-        if (name?.includes("heatmap") || 
-            name === "liquidationlevelstv" || 
-            name === "liquidationlevels" || 
+        if (name?.includes("heatmap") ||
+            name === "liquidationlevelstv" ||
+            name === "liquidationlevels" ||
             name === "cumulativeliqlevel") {
             delete (params as any).timeframe;
             delete (params as any).limit;
@@ -94,10 +129,12 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
     } catch (error: any) {
         const status = error.response?.status;
         const errMsg =
+            error.response?.data?.detail?.message ||
             error.response?.data?.error?.message ||
             error.response?.data?.error ||
             error.response?.data?.message ||
             error.message;
+        const errCode = error.response?.data?.detail?.error_code || "";
         const details = error.response?.data ? JSON.stringify(error.response.data) : "";
 
         let hint = "";
@@ -108,7 +145,7 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
         return {
             content: [{
                 type: "text" as const,
-                text: `Error (${status || "Unknown"}): ${errMsg}. ${details ? `\nDetails: ${details}` : ""}${hint}`
+                text: `Error (${status || "Unknown"}${errCode ? ` ${errCode}` : ""}): ${errMsg}. ${details ? `\nDetails: ${details}` : ""}${hint}`
             }],
             isError: true
         };
@@ -116,68 +153,72 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
 }
 
 const CommonSchema = z.object({
-    coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
-    limit: z.coerce.number().optional(),
+    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+    exchange: z.string().optional().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
+    timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
+    limit: z.coerce.number().optional().describe("Limit of records (e.g. 5, 10, 20, 50, 100, 500, 1000)."),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
-    sort: z.enum(["asc", "desc"]).optional(),
+    sort: z.string().optional().describe("Sort order (asc or desc)."),
 }).describe("Common parameters for hyblock endpoints");
 
 const CoinTimeframeSchema = z.object({
-    coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
-    limit: z.coerce.number().optional(),
+    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+    timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
+    limit: z.coerce.number().optional().describe("Limit of records."),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
-    sort: z.enum(["asc", "desc"]).optional(),
+    sort: z.string().optional().describe("Sort order (asc or desc)."),
 }).describe("Coin and timeframe parameters");
 
 const AnchorSchema = z.object({
-    coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
-    anchor: z.enum(["1h", "4h", "1d"]).describe("Aggregation interval for anchored calculations."),
+    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+    exchange: z.string().optional().describe("Exchange identifier."),
+    timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
+    anchor: z.string().optional().describe("Aggregation interval (1h, 4h, 1d)."),
     limit: z.coerce.number().optional(),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
-    sort: z.enum(["asc", "desc"]).optional(),
+    sort: z.string().optional(),
 }).describe("Anchor parameters");
 
 const LIQ_LVL_SCHEMA = z.object({
-    coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
+    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+    exchange: z.string().optional().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
     timestamp: z.coerce.number().optional(),
-    leverage: z.enum(["all", "high", "medium", "low"]).optional(),
-    position: z.enum(["long", "short"]).optional(),
+    leverage: z.string().optional().describe("Leverage level (all, high, medium, low)."),
+    position: z.string().optional().describe("Position (long, short)."),
 }).describe("Liquidation levels parameters");
 
 const HEATMAP_SCHEMA = z.object({
-    coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
-    lookback: z.string().optional().describe("Lookback period (e.g. 1d, 7d, 1m, 30m, 4h)."),
-    leverage: z.enum(["l1", "l2", "l3", "l4", "l5", "all"]).optional(),
+    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+    exchange: z.string().optional().describe("Exchange identifier."),
+    lookback: z.string().optional().describe("Lookback period (e.g. 1d, 7d, 1m, 4h)."),
+    leverage: z.string().optional().describe("Leverage (l1, l2, l3, l4, l5, all)."),
+    ohlcgraph: z.boolean().optional(),
+    scaling: z.string().optional(),
 }).describe("Heatmap parameters");
 
 const MarginUsedSchema = z.object({
-    coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.enum(["bybit_perp_coin", "bybit_perp_stable"]).describe("Exchange - only bybit_perp_coin or bybit_perp_stable supported."),
-    timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
-    limit: z.coerce.number().optional(),
+    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+    exchange: z.string().optional().describe("Exchange - ONLY okx_perp_coin is supported for topTraderMarginUsed/Delta."),
+    timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
+    limit: z.coerce.number().optional().describe("Limit must be one of: 5, 10, 20, 50, 100, 500, 1000."),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
-    sort: z.enum(["asc", "desc"]).optional(),
-}).describe("Margin used parameters - only Bybit exchanges supported.");
+    sort: z.string().optional(),
+}).describe("Margin used parameters - ONLY okx_perp_coin supported.");
 
 const tools = [
     { name: "hyblock_ping", schema: z.object({}), fn: H.ping, desc: "Check Hyblock API health." },
     { name: "hyblock_catalog", schema: z.object({}), fn: H.getCatalog, desc: "Discovery for available coins/exchanges." },
-    { name: "hyblock_data_availability", schema: z.object({
-        endpointName: z.string().describe("e.g. klines"),
-        coin: z.string(),
-        exchange: z.string().optional(),
-    }).describe("Check historical range."), fn: H.getDataAvailability, desc: "Check historical range." },
+    {
+        name: "hyblock_data_availability", schema: z.object({
+            endpointName: z.string().optional().describe("e.g. klines, liquidation."),
+            coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+            exchange: z.string().optional().describe("Optional exchange identifier."),
+        }).describe("Check historical range."), fn: H.getDataAvailability, desc: "Check historical range."
+    },
     { name: "hyblock_klines", schema: CommonSchema, fn: H.getKlines, endpoint: "klines", desc: "OHLCV klines data." },
     { name: "hyblock_buy_volume", schema: CommonSchema, fn: H.getBuyVolume, endpoint: "buyVolume", desc: "Buy volume data." },
     { name: "hyblock_sell_volume", schema: CommonSchema, fn: H.getSellVolume, endpoint: "sellVolume", desc: "Sell volume data." },
@@ -196,14 +237,25 @@ const tools = [
     { name: "hyblock_market_order_count_ratio", schema: CommonSchema, fn: H.getMarketOrderCountRatio, endpoint: "marketOrderCountRatio", desc: "Market order count ratio." },
     { name: "hyblock_pd_levels", schema: CommonSchema, fn: H.getPdLevels, endpoint: "pdLevels", desc: "Price detection levels." },
     { name: "hyblock_anchored_cvd", schema: AnchorSchema, fn: H.getAnchoredCVD, endpoint: "anchoredCVD", desc: "Anchored CVD." },
-    { name: "hyblock_exchange_premium", schema: z.object({
-        coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-        exchange1: z.string().describe("First exchange."),
-        exchange2: z.string().describe("Second exchange."),
-        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Timeframe."),
-        mode: z.enum(["standard", "percentage"]).describe("Mode (standard or percentage). Required."),
-    }).describe("Exchange premium."), fn: H.getExchangePremium, endpoint: "exchangePremium", desc: "Exchange premium between two exchanges." },
-    { name: "hyblock_funding_rate", schema: CoinTimeframeSchema, fn: H.getFundingRate, endpoint: "fundingRate", desc: "Funding rate." },
+    {
+        name: "hyblock_exchange_premium", schema: z.object({
+            coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+            exchange1: z.string().optional().describe("First exchange identifier."),
+            exchange2: z.string().optional().describe("Second exchange identifier."),
+            timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
+            mode: z.string().optional().describe("Mode (standard or percentage). Default standard."),
+        }).describe("Exchange premium."), fn: H.getExchangePremium, endpoint: "exchangePremium", desc: "Exchange premium between two exchanges."
+    },
+    {
+        name: "hyblock_funding_rate", schema: z.object({
+            coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+            timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
+            limit: z.coerce.number().optional().describe("Limit of records (5, 10, ...)."),
+            startTime: z.coerce.number().optional(),
+            endTime: z.coerce.number().optional(),
+            sort: z.string().optional().describe("Sort order (asc or desc)."),
+        }).describe("Funding rate parameters."), fn: H.getFundingRate, endpoint: "fundingRate", desc: "Funding rate."
+    },
     { name: "hyblock_top_trader_accounts", schema: CommonSchema, fn: H.getTopTraderAccounts, endpoint: "topTraderAccounts", desc: "Top trader accounts." },
     { name: "hyblock_top_trader_positions", schema: CommonSchema, fn: H.getTopTraderPositions, endpoint: "topTraderPositions", desc: "Top trader positions." },
     { name: "hyblock_global_accounts", schema: CommonSchema, fn: H.getGlobalAccounts, endpoint: "globalAccounts", desc: "Global accounts." },
@@ -220,33 +272,38 @@ const tools = [
     { name: "hyblock_open_interest", schema: CoinTimeframeSchema, fn: H.getOpenInterest, endpoint: "openInterest", desc: "Open interest." },
     { name: "hyblock_open_interest_delta", schema: CoinTimeframeSchema, fn: H.getOpenInterestDelta, endpoint: "openInterestDelta", desc: "Open interest delta." },
     { name: "hyblock_bvol", schema: CommonSchema, fn: H.getBvol, endpoint: "bvol", desc: "Bitcoin volume." },
-    { name: "hyblock_dvol", schema: z.object({
-        coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-        exchange: z.literal("deribit_perp_stable").describe("Exchange - ONLY deribit_perp_stable supported."),
-        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
-        limit: z.coerce.number().optional(),
-        startTime: z.coerce.number().optional(),
-        endTime: z.coerce.number().optional(),
-        sort: z.enum(["asc", "desc"]).optional(),
-    }).describe("Dominance volume - ONLY deribit_perp_stable supported."), fn: H.getDvol, endpoint: "dvol", desc: "Dominance volume." },
-    { name: "hyblock_margin_lending_ratio", schema: z.object({
-        coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-        exchange: z.enum(["binance_spot"]).describe("Exchange - only binance_spot supported."),
-        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
-        limit: z.coerce.number().optional(),
-        startTime: z.coerce.number().optional(),
-        endTime: z.coerce.number().optional(),
-        sort: z.enum(["asc", "desc"]).optional(),
-    }).describe("Margin lending ratio - only binance_spot supported."), fn: H.getMarginLendingRatio, endpoint: "marginLendingRatio", desc: "Margin lending ratio." },
-    { name: "hyblock_user_bot_ratio", schema: z.object({
-        coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-        exchange: z.enum(["binance_perp_stable", "bybit_perp_stable", "okx_perp_stable", "gate_perp_stable", "dydx_perp_stable", "deribit_perp_stable", "bitmex_perp_stable"]).describe("Exchange identifier."),
-        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
-        limit: z.coerce.number().optional(),
-        startTime: z.coerce.number().optional(),
-        endTime: z.coerce.number().optional(),
-        sort: z.enum(["asc", "desc"]).optional(),
-    }).describe("User bot ratio parameters."), fn: H.getUserBotRatio, endpoint: "userBotRatio", desc: "User bot ratio." },
+    {
+        name: "hyblock_dvol", schema: z.object({
+            coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
+            exchange: z.string().describe("Exchange - ONLY deribit_perp_stable supported."),
+            timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
+            limit: z.coerce.number().optional().describe("Limit must be one of: 5, 10, 20, 50, 100, 500, 1000."),
+            startTime: z.coerce.number().optional(),
+            endTime: z.coerce.number().optional(),
+            sort: z.enum(["asc", "desc"]).optional(),
+        }).describe("Dominance volume - ONLY deribit_perp_stable supported."), fn: H.getDvol, endpoint: "dvol", desc: "Dominance volume."
+    },
+    {
+        name: "hyblock_margin_lending_ratio", schema: z.object({
+            coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
+            exchange: z.string().describe("Exchange - supported: okx_perp_coin, bitget_perp_stable."),
+            timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
+            limit: z.coerce.number().optional().describe("Limit must be one of: 5, 10, 20, 50, 100, 500, 1000."),
+            startTime: z.coerce.number().optional(),
+            endTime: z.coerce.number().optional(),
+            sort: z.enum(["asc", "desc"]).optional(),
+        }).describe("Margin lending ratio - supported exchanges: okx_perp_coin, bitget_perp_stable."), fn: H.getMarginLendingRatio, endpoint: "marginLendingRatio", desc: "Margin lending ratio."
+    },
+    {
+        name: "hyblock_user_bot_ratio", schema: z.object({
+            coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
+            timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
+            limit: z.coerce.number().optional().describe("Limit of records (5, 10, ...)."),
+            startTime: z.coerce.number().optional(),
+            endTime: z.coerce.number().optional(),
+            sort: z.string().optional().describe("Sort order (asc or desc)."),
+        }).describe("User bot ratio (global, no exchange needed)."), fn: H.getUserBotRatio, endpoint: "userBotRatio", desc: "User bot ratio (global metric, no exchange parameter)."
+    },
     { name: "hyblock_liquidation", schema: CommonSchema, fn: H.getLiquidation, endpoint: "liquidation", desc: "Liquidation data." },
     { name: "hyblock_liq_levels_count", schema: CommonSchema, fn: H.getLiqLevelsCount, endpoint: "liqLevelsCount", desc: "Liquidation levels count." },
     { name: "hyblock_liq_levels_size", schema: CommonSchema, fn: H.getLiqLevelsSize, endpoint: "liqLevelsSize", desc: "Liquidation levels size." },
@@ -271,15 +328,21 @@ const tools = [
     { name: "hyblock_global_bid_ask_ratio_increase_decrease", schema: CoinTimeframeSchema, fn: H.getGlobalBidAskRatioIncreaseDecrease, endpoint: "globalBidAskRatioIncreaseDecrease", desc: "Global bid/ask ratio increase/decrease." },
     { name: "hyblock_global_bids_increase_decrease", schema: CoinTimeframeSchema, fn: H.getGlobalBidsIncreaseDecrease, endpoint: "globalBidsIncreaseDecrease", desc: "Global bids increase/decrease." },
     { name: "hyblock_global_asks_increase_decrease", schema: CoinTimeframeSchema, fn: H.getGlobalAsksIncreaseDecrease, endpoint: "globalAsksIncreaseDecrease", desc: "Global asks increase/decrease." },
-    { name: "hyblock_leaderboard_notional_profit", schema: z.object({
-        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Timeframe."),
-        limit: z.coerce.number().optional(),
-    }).describe("Leaderboard notional profit."), fn: H.getLeaderboardNotionalProfit, endpoint: "leaderboardNotionalProfit", desc: "Leaderboard notional profit." },
-    { name: "hyblock_wbtc_mint_burn", schema: z.object({
-        coin: z.string().describe("Coin symbol (e.g. btc)."),
-        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Timeframe."),
-        limit: z.coerce.number().optional(),
-    }).describe("WBTC mint/burn."), fn: H.getWbtcMintBurn, endpoint: "wbtcMintBurn", desc: "WBTC mint/burn data." },
+    {
+        name: "hyblock_leaderboard_notional_profit", schema: z.object({
+            timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
+            limit: z.coerce.number().optional().describe("Limit of records (5, 10, ...)."),
+        }).describe("Leaderboard notional profit."), fn: H.getLeaderboardNotionalProfit, endpoint: "leaderboardNotionalProfit", desc: "Leaderboard notional profit."
+    },
+    {
+        name: "hyblock_wbtc_mint_burn", schema: z.object({
+            coin: z.string().optional().describe("Coin symbol - typically 'btc'."),
+            timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1h, 1d)."),
+            limit: z.coerce.number().optional().describe("Limit must be one of: 5, 10, 20, 50, 100, 500, 1000. Omit for all records."),
+            startTime: z.coerce.number().optional(),
+            endTime: z.coerce.number().optional(),
+        }).describe("WBTC mint/burn (no exchange needed, omit limit or use 5/10/20/50/100/500/1000)."), fn: H.getWbtcMintBurn, endpoint: "wbtcMintBurn", desc: "WBTC mint/burn data."
+    },
 ];
 
 function createMcpServer(): McpServer {
@@ -347,7 +410,7 @@ app.post("/mcp", async (req: express.Request, res: express.Response) => {
     try {
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
-        
+
         if (!res.headersSent) {
             res.setHeader("mcp-session-id", newSessionId);
         }

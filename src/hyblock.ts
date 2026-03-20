@@ -3,22 +3,22 @@ import { AxiosInstance } from "axios";
 // ─── Shared param types ────────────────────────────────────────────────────────
 
 export interface CommonParams {
-    coin: string;
-    exchange: string;
-    timeframe: string;
+    coin?: string;
+    exchange?: string;
+    timeframe?: string;
     limit?: number;
     startTime?: number;
     endTime?: number;
-    sort?: "asc" | "desc";
+    sort?: string;
 }
 
 export interface CoinTimeframeParams {
-    coin: string;
-    timeframe: string;
+    coin?: string;
+    timeframe?: string;
     limit?: number;
     startTime?: number;
     endTime?: number;
-    sort?: "asc" | "desc";
+    sort?: string;
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ export async function getCatalog(client: AxiosInstance) {
 
 export async function getDataAvailability(
     client: AxiosInstance,
-    params: { endpointName: string; coin: string; exchange?: string }
+    params: { endpointName?: string; coin?: string; exchange?: string }
 ) {
     const res = await client.get("/dataAvailability", { params });
     return res.data;
@@ -160,7 +160,7 @@ export async function getMarketOrderCountRatio(
 
 export async function getExchangePremium(
     client: AxiosInstance,
-    params: { coin: string; exchange1: string; exchange2: string; timeframe: string; mode: "standard" | "percentage"; limit?: number; startTime?: number; endTime?: number; sort?: "asc" | "desc" }
+    params: { coin?: string; exchange1?: string; exchange2?: string; timeframe?: string; mode?: string; limit?: number; startTime?: number; endTime?: number; sort?: string }
 ) {
     const res = await client.get("/exchangePremium", { params });
     return res.data;
@@ -274,7 +274,7 @@ export async function getMarketImbalanceIndex(
 
 export async function getGlobalBidAskRatio(
     client: AxiosInstance,
-    params: { coin: string; timeframe: string; limit?: number; startTime?: number; endTime?: number; sort?: "asc" | "desc" }
+    params: { coin?: string; timeframe?: string; limit?: number; startTime?: number; endTime?: number; sort?: string }
 ) {
     const res = await client.get("/globalBidAskRatio", { params });
     return res.data;
@@ -282,7 +282,7 @@ export async function getGlobalBidAskRatio(
 
 export async function getGlobalCombinedBook(
     client: AxiosInstance,
-    params: { coin: string; timeframe: string; limit?: number; startTime?: number; endTime?: number; sort?: "asc" | "desc" }
+    params: { coin?: string; timeframe?: string; limit?: number; startTime?: number; endTime?: number; sort?: string }
 ) {
     const res = await client.get("/globalCombinedBook", { params });
     return res.data;
@@ -336,9 +336,17 @@ export async function getMarginLendingRatio(
 
 export async function getUserBotRatio(
     client: AxiosInstance,
-    params: CommonParams
+    // Note: userBotRatio is a global metric; the API does NOT accept an exchange parameter
+    params: CoinTimeframeParams
 ) {
-    const res = await client.get("/userBotRatio", { params });
+    // Strip exchange if accidentally passed - the API rejects it
+    const { coin, timeframe, limit, startTime, endTime, sort } = params as any;
+    const cleanParams: any = { coin, timeframe };
+    if (limit !== undefined) cleanParams.limit = limit;
+    if (startTime !== undefined) cleanParams.startTime = startTime;
+    if (endTime !== undefined) cleanParams.endTime = endTime;
+    if (sort !== undefined) cleanParams.sort = sort;
+    const res = await client.get("/userBotRatio", { params: cleanParams });
     return res.data;
 }
 
@@ -370,7 +378,7 @@ export async function getLiqLevelsSize(
 
 export async function getLiquidationHeatmap(
     client: AxiosInstance,
-    params: { coin: string; exchange: string; lookback?: number; leverage?: string; ohlcgraph?: boolean; scaling?: string; timestamp?: number }
+    params: { coin?: string; exchange?: string; lookback?: string; leverage?: string; ohlcgraph?: boolean; scaling?: string; timestamp?: number }
 ) {
     const res = await client.get("/liquidationHeatmap", { params });
     return res.data;
@@ -460,7 +468,7 @@ export async function getLeaderboardNotionalProfit(client: AxiosInstance, params
     return res.data;
 }
 
-export async function getLiquidationLevelsTV(client: AxiosInstance, params: { coin: string; exchange: string; timestamp?: number; leverage?: string; position?: string; tier?: string; openDuration?: number; oidv?: number }) {
+export async function getLiquidationLevelsTV(client: AxiosInstance, params: { coin?: string; exchange?: string; timestamp?: number; leverage?: string; position?: string; tier?: string; openDuration?: number; oidv?: number }) {
     const res = await client.get("/liquidationLevelsTV", { params });
     return res.data;
 }
@@ -475,12 +483,12 @@ export async function getTopTraderMarginUsedDelta(client: AxiosInstance, params:
     return res.data;
 }
 
-export async function getLiquidationLevels(client: AxiosInstance, params: { coin: string; exchange: string; leverage?: string; timestamp?: number; position?: string }) {
+export async function getLiquidationLevels(client: AxiosInstance, params: { coin?: string; exchange?: string; leverage?: string; timestamp?: number; position?: string }) {
     const res = await client.get("/liquidationLevels", { params });
     return res.data;
 }
 
-export async function getCumulativeLiqLevel(client: AxiosInstance, params: { coin: string; exchange: string; leverage?: string; timestamp?: number; position?: string }) {
+export async function getCumulativeLiqLevel(client: AxiosInstance, params: { coin?: string; exchange?: string; leverage?: string; timestamp?: number; position?: string }) {
     const res = await client.get("/cumulativeLiqLevel", { params });
     return res.data;
 }
