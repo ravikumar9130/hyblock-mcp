@@ -80,7 +80,11 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
         const params = normalizeParams(args);
 
         const name = endpoint?.toLowerCase();
-        if (name?.includes("liq") || name?.includes("heatmap")) {
+        // Only strip timeframe for heatmap and liquidation LEVELS endpoints (not liquidation/liq_levels)
+        if (name?.includes("heatmap") || 
+            name === "liquidationlevelstv" || 
+            name === "liquidationlevels" || 
+            name === "cumulativeliqlevel") {
             delete (params as any).timeframe;
             delete (params as any).limit;
         }
@@ -158,13 +162,13 @@ const HEATMAP_SCHEMA = z.object({
 
 const MarginUsedSchema = z.object({
     coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().describe("Exchange identifier (e.g. bybit_perp_coin, bybit_perp_stable). Note: binance_perp_stable not supported."),
+    exchange: z.enum(["bybit_perp_coin", "bybit_perp_stable"]).describe("Exchange - only bybit_perp_coin or bybit_perp_stable supported."),
     timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
     limit: z.coerce.number().optional(),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
     sort: z.enum(["asc", "desc"]).optional(),
-}).describe("Margin used parameters (exchange must be supported, e.g. bybit_perp_coin).");
+}).describe("Margin used parameters - only Bybit exchanges supported.");
 
 const tools = [
     { name: "hyblock_ping", schema: z.object({}), fn: H.ping, desc: "Check Hyblock API health." },
@@ -197,7 +201,7 @@ const tools = [
         exchange1: z.string().describe("First exchange."),
         exchange2: z.string().describe("Second exchange."),
         timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Timeframe."),
-        mode: z.enum(["standard", "percentage"]).optional().describe("Mode."),
+        mode: z.enum(["standard", "percentage"]).describe("Mode (standard or percentage). Required."),
     }).describe("Exchange premium."), fn: H.getExchangePremium, endpoint: "exchangePremium", desc: "Exchange premium between two exchanges." },
     { name: "hyblock_funding_rate", schema: CoinTimeframeSchema, fn: H.getFundingRate, endpoint: "fundingRate", desc: "Funding rate." },
     { name: "hyblock_top_trader_accounts", schema: CommonSchema, fn: H.getTopTraderAccounts, endpoint: "topTraderAccounts", desc: "Top trader accounts." },
@@ -216,9 +220,33 @@ const tools = [
     { name: "hyblock_open_interest", schema: CoinTimeframeSchema, fn: H.getOpenInterest, endpoint: "openInterest", desc: "Open interest." },
     { name: "hyblock_open_interest_delta", schema: CoinTimeframeSchema, fn: H.getOpenInterestDelta, endpoint: "openInterestDelta", desc: "Open interest delta." },
     { name: "hyblock_bvol", schema: CommonSchema, fn: H.getBvol, endpoint: "bvol", desc: "Bitcoin volume." },
-    { name: "hyblock_dvol", schema: CommonSchema, fn: H.getDvol, endpoint: "dvol", desc: "Dominance volume." },
-    { name: "hyblock_margin_lending_ratio", schema: CommonSchema, fn: H.getMarginLendingRatio, endpoint: "marginLendingRatio", desc: "Margin lending ratio." },
-    { name: "hyblock_user_bot_ratio", schema: CommonSchema, fn: H.getUserBotRatio, endpoint: "userBotRatio", desc: "User bot ratio." },
+    { name: "hyblock_dvol", schema: z.object({
+        coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
+        exchange: z.literal("deribit_perp_stable").describe("Exchange - ONLY deribit_perp_stable supported."),
+        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
+        limit: z.coerce.number().optional(),
+        startTime: z.coerce.number().optional(),
+        endTime: z.coerce.number().optional(),
+        sort: z.enum(["asc", "desc"]).optional(),
+    }).describe("Dominance volume - ONLY deribit_perp_stable supported."), fn: H.getDvol, endpoint: "dvol", desc: "Dominance volume." },
+    { name: "hyblock_margin_lending_ratio", schema: z.object({
+        coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
+        exchange: z.enum(["binance_spot"]).describe("Exchange - only binance_spot supported."),
+        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
+        limit: z.coerce.number().optional(),
+        startTime: z.coerce.number().optional(),
+        endTime: z.coerce.number().optional(),
+        sort: z.enum(["asc", "desc"]).optional(),
+    }).describe("Margin lending ratio - only binance_spot supported."), fn: H.getMarginLendingRatio, endpoint: "marginLendingRatio", desc: "Margin lending ratio." },
+    { name: "hyblock_user_bot_ratio", schema: z.object({
+        coin: z.string().describe("Coin symbol (e.g. btc, eth)."),
+        exchange: z.enum(["binance_perp_stable", "bybit_perp_stable", "okx_perp_stable", "gate_perp_stable", "dydx_perp_stable", "deribit_perp_stable", "bitmex_perp_stable"]).describe("Exchange identifier."),
+        timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Required candle timeframe."),
+        limit: z.coerce.number().optional(),
+        startTime: z.coerce.number().optional(),
+        endTime: z.coerce.number().optional(),
+        sort: z.enum(["asc", "desc"]).optional(),
+    }).describe("User bot ratio parameters."), fn: H.getUserBotRatio, endpoint: "userBotRatio", desc: "User bot ratio." },
     { name: "hyblock_liquidation", schema: CommonSchema, fn: H.getLiquidation, endpoint: "liquidation", desc: "Liquidation data." },
     { name: "hyblock_liq_levels_count", schema: CommonSchema, fn: H.getLiqLevelsCount, endpoint: "liqLevelsCount", desc: "Liquidation levels count." },
     { name: "hyblock_liq_levels_size", schema: CommonSchema, fn: H.getLiqLevelsSize, endpoint: "liqLevelsSize", desc: "Liquidation levels size." },
@@ -248,6 +276,7 @@ const tools = [
         limit: z.coerce.number().optional(),
     }).describe("Leaderboard notional profit."), fn: H.getLeaderboardNotionalProfit, endpoint: "leaderboardNotionalProfit", desc: "Leaderboard notional profit." },
     { name: "hyblock_wbtc_mint_burn", schema: z.object({
+        coin: z.string().describe("Coin symbol (e.g. btc)."),
         timeframe: z.enum(["1m", "5m", "15m", "1h", "4h", "1d"]).describe("Timeframe."),
         limit: z.coerce.number().optional(),
     }).describe("WBTC mint/burn."), fn: H.getWbtcMintBurn, endpoint: "wbtcMintBurn", desc: "WBTC mint/burn data." },
