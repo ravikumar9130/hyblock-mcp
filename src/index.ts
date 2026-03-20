@@ -153,61 +153,61 @@ async function toolHandler(fn: Function, args: any, endpoint?: string) {
 }
 
 const CommonSchema = z.object({
-    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().optional().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
-    timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
-    limit: z.coerce.number().optional().describe("Limit of records (e.g. 5, 10, 20, 50, 100, 500, 1000)."),
-    startTime: z.coerce.number().optional(),
-    endTime: z.coerce.number().optional(),
-    sort: z.string().optional().describe("Sort order (asc or desc)."),
-}).describe("Common parameters for hyblock endpoints");
+    coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+    exchange: z.string().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable). Required."),
+    timeframe: z.string().describe("Required interval/timeframe (e.g. 1m, 5m, 1h, 1d)."),
+    limit: z.coerce.number().optional().describe("Number of records to return (5, 10, 20, 50, 100, 500, 1000)."),
+    startTime: z.coerce.number().optional().describe("Optional start timestamp (ms)."),
+    endTime: z.coerce.number().optional().describe("Optional end timestamp (ms)."),
+    sort: z.string().optional().describe("Sort order: asc or desc."),
+}).describe("Common parameters for hyblock endpoints - coin, exchange, and timeframe are REQUIRED.");
 
 const CoinTimeframeSchema = z.object({
-    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-    timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
-    limit: z.coerce.number().optional().describe("Limit of records."),
+    coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+    timeframe: z.string().describe("Required interval/timeframe (e.g. 1m, 5m, 1h, 1d)."),
+    limit: z.coerce.number().optional().describe("Number of records."),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
-    sort: z.string().optional().describe("Sort order (asc or desc)."),
-}).describe("Coin and timeframe parameters");
+    sort: z.string().optional().describe("Sort order: asc or desc."),
+}).describe("Coin and timeframe parameters - both are REQUIRED.");
 
 const AnchorSchema = z.object({
-    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().optional().describe("Exchange identifier."),
-    timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
-    anchor: z.string().optional().describe("Aggregation interval (1h, 4h, 1d)."),
+    coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+    exchange: z.string().describe("Exchange identifier. Required."),
+    timeframe: z.string().describe("Candle interval (e.g. 1h, 1d). Required."),
+    anchor: z.string().describe("Aggregation interval (1h, 4h, 1d). Required."),
     limit: z.coerce.number().optional(),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
     sort: z.string().optional(),
-}).describe("Anchor parameters");
+}).describe("Anchor parameters - coin, exchange, timeframe, and anchor are REQUIRED.");
 
 const LIQ_LVL_SCHEMA = z.object({
-    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().optional().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable)."),
-    timestamp: z.coerce.number().optional(),
+    coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+    exchange: z.string().describe("Exchange identifier (e.g. binance_perp_stable, bybit_perp_stable). Required."),
+    timestamp: z.coerce.number().optional().describe("Optional historical timestamp."),
     leverage: z.string().optional().describe("Leverage level (all, high, medium, low)."),
     position: z.string().optional().describe("Position (long, short)."),
-}).describe("Liquidation levels parameters");
+}).describe("Liquidation levels parameters - coin and exchange are REQUIRED.");
 
 const HEATMAP_SCHEMA = z.object({
-    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().optional().describe("Exchange identifier."),
+    coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+    exchange: z.string().describe("Exchange identifier. Required."),
     lookback: z.string().optional().describe("Lookback period (e.g. 1d, 7d, 1m, 4h)."),
     leverage: z.string().optional().describe("Leverage (l1, l2, l3, l4, l5, all)."),
     ohlcgraph: z.boolean().optional(),
-    scaling: z.string().optional(),
-}).describe("Heatmap parameters");
+    scaling: z.string().optional().describe("e.g. linear, log."),
+}).describe("Heatmap parameters - coin and exchange are REQUIRED.");
 
 const MarginUsedSchema = z.object({
-    coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-    exchange: z.string().optional().describe("Exchange - ONLY okx_perp_coin is supported for topTraderMarginUsed/Delta."),
-    timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
-    limit: z.coerce.number().optional().describe("Limit must be one of: 5, 10, 20, 50, 100, 500, 1000."),
+    coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+    exchange: z.string().describe("Exchange - ONLY okx_perp_coin is supported. Mandatory."),
+    timeframe: z.string().describe("Required candle timeframe (e.g. 1h, 1d)."),
+    limit: z.coerce.number().optional().describe("Valid limits: 5, 10, 20, 50, 100, 500, 1000."),
     startTime: z.coerce.number().optional(),
     endTime: z.coerce.number().optional(),
     sort: z.string().optional(),
-}).describe("Margin used parameters - ONLY okx_perp_coin supported.");
+}).describe("Margin used parameters - coin, exchange(okx_perp_coin), and timeframe are REQUIRED.");
 
 const tools = [
     { name: "hyblock_ping", schema: z.object({}), fn: H.ping, desc: "Check Hyblock API health." },
@@ -239,21 +239,21 @@ const tools = [
     { name: "hyblock_anchored_cvd", schema: AnchorSchema, fn: H.getAnchoredCVD, endpoint: "anchoredCVD", desc: "Anchored CVD." },
     {
         name: "hyblock_exchange_premium", schema: z.object({
-            coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-            exchange1: z.string().optional().describe("First exchange identifier."),
-            exchange2: z.string().optional().describe("Second exchange identifier."),
-            timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
-            mode: z.string().optional().describe("Mode (standard or percentage). Default standard."),
+            coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+            exchange1: z.string().describe("First exchange identifier. Required."),
+            exchange2: z.string().describe("Second exchange identifier. Required."),
+            timeframe: z.string().describe("Required interval (e.g. 1h, 1d)."),
+            mode: z.string().describe("Mode: standard or percentage. Default standard. Required."),
         }).describe("Exchange premium."), fn: H.getExchangePremium, endpoint: "exchangePremium", desc: "Exchange premium between two exchanges."
     },
     {
         name: "hyblock_funding_rate", schema: z.object({
-            coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-            timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
-            limit: z.coerce.number().optional().describe("Limit of records (5, 10, ...)."),
+            coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+            timeframe: z.string().describe("Required candle timeframe (e.g. 1m, 5m, 1h, 1d)."),
+            limit: z.coerce.number().optional().describe("Valid limits: 5, 10, 20, 50, 100, 500, 1000."),
             startTime: z.coerce.number().optional(),
             endTime: z.coerce.number().optional(),
-            sort: z.string().optional().describe("Sort order (asc or desc)."),
+            sort: z.string().optional().describe("Sort order: asc or desc."),
         }).describe("Funding rate parameters."), fn: H.getFundingRate, endpoint: "fundingRate", desc: "Funding rate."
     },
     { name: "hyblock_top_trader_accounts", schema: CommonSchema, fn: H.getTopTraderAccounts, endpoint: "topTraderAccounts", desc: "Top trader accounts." },
@@ -296,12 +296,12 @@ const tools = [
     },
     {
         name: "hyblock_user_bot_ratio", schema: z.object({
-            coin: z.string().optional().describe("Coin symbol (e.g. btc, eth)."),
-            timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1m, 5m, 1h, 1d). Default 1h."),
-            limit: z.coerce.number().optional().describe("Limit of records (5, 10, ...)."),
+            coin: z.string().describe("Coin symbol (e.g. btc, eth). Required."),
+            timeframe: z.string().describe("Required interval/timeframe (e.g. 1m, 5m, 1h, 1d)."),
+            limit: z.coerce.number().optional().describe("Valid limits: 5, 10, 20, 50, 100, 500, 1000."),
             startTime: z.coerce.number().optional(),
             endTime: z.coerce.number().optional(),
-            sort: z.string().optional().describe("Sort order (asc or desc)."),
+            sort: z.string().optional().describe("Sort order: asc or desc."),
         }).describe("User bot ratio (global, no exchange needed)."), fn: H.getUserBotRatio, endpoint: "userBotRatio", desc: "User bot ratio (global metric, no exchange parameter)."
     },
     { name: "hyblock_liquidation", schema: CommonSchema, fn: H.getLiquidation, endpoint: "liquidation", desc: "Liquidation data." },
@@ -330,18 +330,18 @@ const tools = [
     { name: "hyblock_global_asks_increase_decrease", schema: CoinTimeframeSchema, fn: H.getGlobalAsksIncreaseDecrease, endpoint: "globalAsksIncreaseDecrease", desc: "Global asks increase/decrease." },
     {
         name: "hyblock_leaderboard_notional_profit", schema: z.object({
-            timeframe: z.string().optional().describe("Interval (e.g. 1h, 1d)."),
+            timeframe: z.string().describe("Required interval (e.g. 1h, 1d)."),
             limit: z.coerce.number().optional().describe("Limit of records (5, 10, ...)."),
         }).describe("Leaderboard notional profit."), fn: H.getLeaderboardNotionalProfit, endpoint: "leaderboardNotionalProfit", desc: "Leaderboard notional profit."
     },
     {
         name: "hyblock_wbtc_mint_burn", schema: z.object({
-            coin: z.string().optional().describe("Coin symbol - typically 'btc'."),
-            timeframe: z.string().optional().describe("Interval/timeframe (e.g. 1h, 1d)."),
-            limit: z.coerce.number().optional().describe("Limit must be one of: 5, 10, 20, 50, 100, 500, 1000. Omit for all records."),
+            coin: z.string().describe("Coin symbol - use 'btc'. Required."),
+            timeframe: z.string().describe("Required timeframe (NOTE: use '1d' to see data; '1h' currently returns empty)."),
+            limit: z.coerce.number().optional().describe("Limit: 5, 10, 20, 50, 100, 500, 1000. Omit for all records."),
             startTime: z.coerce.number().optional(),
             endTime: z.coerce.number().optional(),
-        }).describe("WBTC mint/burn (no exchange needed, omit limit or use 5/10/20/50/100/500/1000)."), fn: H.getWbtcMintBurn, endpoint: "wbtcMintBurn", desc: "WBTC mint/burn data."
+        }).describe("WBTC mint/burn (global metric - use 1d timeframe for results)."), fn: H.getWbtcMintBurn, endpoint: "wbtcMintBurn", desc: "WBTC mint/burn data."
     },
 ];
 
